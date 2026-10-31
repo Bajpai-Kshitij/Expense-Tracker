@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { formatPaise, addPaise, subtractPaise } from '../core/money.js';
 import { isNativePlatform, getPlatform } from '../native/index.js';
+import NativeDebug from './NativeDebug.jsx';
 import './App.css';
 
 export default function App() {
@@ -82,6 +83,8 @@ export default function App() {
             <span className="status-value">Native Android Gradle Project</span>
           </div>
         </div>
+
+        <NativeDebug />
       </main>
 
       <footer>
