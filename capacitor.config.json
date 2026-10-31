@@ -1,0 +1,9 @@
+{
+  "appId": "com.bajpai.expense.tracker",
+  "appName": "Expense Tracker",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
+
