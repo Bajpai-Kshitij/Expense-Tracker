@@ -31,3 +31,6 @@ export function getPlatform() {
   return window.Capacitor?.getPlatform?.() || 'web';
 }
 
+export { createCapacitorSqliteAdapter } from './sqlite.js';
+
+

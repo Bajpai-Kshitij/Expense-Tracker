@@ -13,6 +13,7 @@
     "cap:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^6.0.2",
     "@capacitor/android": "^6.2.0",
     "@capacitor/core": "^6.2.0",
     "@noble/hashes": "^2.4.0",
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@capacitor/cli": "^6.2.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "sql.js": "^1.15.2",
     "vite": "^5.4.14",
     "vitest": "^2.1.8"
   }
