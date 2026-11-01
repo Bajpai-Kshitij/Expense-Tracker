@@ -131,7 +131,7 @@ public class ExpenseNativePlugin extends Plugin {
             return;
         }
 
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             try {
                 Uri treeUri = Uri.parse(uriStr);
                 ContentResolver resolver = getContext().getContentResolver();
@@ -181,7 +181,7 @@ public class ExpenseNativePlugin extends Plugin {
         }
         String prefix = call.getString("prefix");
 
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             try {
                 Uri treeUri = Uri.parse(uriStr);
                 ContentResolver resolver = getContext().getContentResolver();
@@ -246,7 +246,7 @@ public class ExpenseNativePlugin extends Plugin {
             return;
         }
 
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             try {
                 Uri treeUri = Uri.parse(uriStr);
                 Uri fileUri = findChildUri(treeUri, name);
@@ -297,7 +297,7 @@ public class ExpenseNativePlugin extends Plugin {
             return;
         }
 
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             try {
                 Uri treeUri = Uri.parse(uriStr);
                 ContentResolver resolver = getContext().getContentResolver();
@@ -384,7 +384,7 @@ public class ExpenseNativePlugin extends Plugin {
         }
         final String finalText = (text != null) ? text : "";
 
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             try {
                 Uri treeUri = Uri.parse(uriStr);
                 ContentResolver resolver = getContext().getContentResolver();
@@ -438,7 +438,7 @@ public class ExpenseNativePlugin extends Plugin {
     }
 
     private void readSmsInternal(PluginCall call) {
-        getBridge().executeOnExecutor(() -> {
+        getBridge().execute(() -> {
             Cursor cursor = null;
             try {
                 Long sinceEpochMs = call.getLong("sinceEpochMs");

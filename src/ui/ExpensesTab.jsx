@@ -13,6 +13,7 @@ export default function ExpensesTab({
   accountsMap = {},
   initialFilters = {},
   onSelectExpense,
+  onNavigateToUncategorized,
 }) {
   const [filterState, setFilterState] = useState({
     preset: initialFilters.preset || 'this_month',
@@ -221,6 +222,20 @@ export default function ExpensesTab({
             Include Fixed
           </label>
         </div>
+
+        {filterState.categoryId === '__uncategorized__' && onNavigateToUncategorized && (
+          <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Review in Inbox to batch categorize</span>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ padding: '4px 10px', minHeight: '30px', fontSize: '0.75rem' }}
+              onClick={onNavigateToUncategorized}
+            >
+              Open Inbox ➔
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Expenses List */}

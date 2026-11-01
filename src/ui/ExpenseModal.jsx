@@ -6,6 +6,8 @@ export default function ExpenseModal({
   expense = null, // if present, edit mode; if null, add mode
   categories = [],
   accounts = [],
+  brands = [],
+  rules = [],
   writer,
   deviceId,
   onClose,
@@ -63,7 +65,12 @@ export default function ExpenseModal({
           onClose();
         }
       } else {
-        const createData = buildCreateData(validation.value, { deviceId });
+        const createData = buildCreateData(validation.value, {
+          deviceId,
+          brands,
+          rules,
+          accounts,
+        });
         await writer.write('expense.created', createData);
         onSuccess('Expense created successfully');
       }
@@ -174,7 +181,7 @@ export default function ExpenseModal({
                   onChange={(e) => handleChange('categoryId', e.target.value)}
                 >
                   <option value="">(Uncategorized)</option>
-                  {categories.map((c) => (
+                  {categories.filter((c) => !c.archived).map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>

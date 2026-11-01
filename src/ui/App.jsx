@@ -6,12 +6,15 @@ import { checkFolder } from '../native/expenseNative.js';
 import { initRuntime } from '../native/syncRuntime.js';
 import { migrate, settings } from '../core/db/index.js';
 import { seedIfEmpty } from '../core/seed/seed.js';
+import { seedBrandsIfEmpty } from '../core/seed/brandSeed.js';
 
 import Onboarding from './Onboarding.jsx';
 import HomeTab from './HomeTab.jsx';
 import ExpensesTab from './ExpensesTab.jsx';
 import SettingsTab from './SettingsTab.jsx';
 import ExpenseModal from './ExpenseModal.jsx';
+import UncategorizedInbox from './UncategorizedInbox.jsx';
+import RulesBrandsScreen from './RulesBrandsScreen.jsx';
 
 export default function App() {
   const [appState, setAppState] = useState('loading'); // 'loading' | 'onboarding' | 'repick' | 'ready'
@@ -22,9 +25,11 @@ export default function App() {
   const [deviceId, setDeviceId] = useState('');
   const [deviceLabel, setDeviceLabel] = useState('Me');
 
-  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'expenses' | 'settings'
+  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'expenses' | 'settings' | 'uncategorized' | 'rules_brands'
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [rules, setRules] = useState([]);
   const [devices, setDevices] = useState([]);
   const [includeFixed, setIncludeFixed] = useState(false);
 
@@ -49,11 +54,49 @@ export default function App() {
   const loadLookups = async (database, currentRuntime) => {
     if (!database) return;
     try {
-      const cats = await database.query('SELECT * FROM categories ORDER BY name ASC;');
-      setCategories(cats);
+      const catRows = await database.query('SELECT * FROM categories ORDER BY name ASC;');
+      const parsedCats = catRows.map((c) => {
+        if (c.extras) {
+          try {
+            return { ...JSON.parse(c.extras), id: c.id };
+          } catch (e) {}
+        }
+        return c;
+      });
+      setCategories(parsedCats);
 
-      const accs = await database.query('SELECT * FROM accounts ORDER BY name ASC;');
-      setAccounts(accs);
+      const accRows = await database.query('SELECT * FROM accounts ORDER BY name ASC;');
+      const parsedAccs = accRows.map((a) => {
+        if (a.extras) {
+          try {
+            return { ...JSON.parse(a.extras), id: a.id };
+          } catch (e) {}
+        }
+        return a;
+      });
+      setAccounts(parsedAccs);
+
+      const brandRows = await database.query('SELECT * FROM brands;');
+      const parsedBrands = brandRows.map((b) => {
+        if (b.extras) {
+          try {
+            return { ...JSON.parse(b.extras), id: b.id };
+          } catch (e) {}
+        }
+        return { id: b.id, name: b.name, categoryId: b.default_category_id };
+      });
+      setBrands(parsedBrands);
+
+      const ruleRows = await database.query('SELECT * FROM rules;');
+      const parsedRules = ruleRows.map((r) => {
+        if (r.extras) {
+          try {
+            return { ...JSON.parse(r.extras), id: r.id };
+          } catch (e) {}
+        }
+        return { id: r.id, pattern: r.pattern, categoryId: r.category_id, accountId: r.account_id };
+      });
+      setRules(parsedRules);
 
       if (currentRuntime?.listDevices) {
         const devs = await currentRuntime.listDevices();
@@ -132,6 +175,7 @@ export default function App() {
         // Run initial sync and seed
         await rt.sync();
         await seedIfEmpty({ writer: rt.writer, db: database, settings });
+        await seedBrandsIfEmpty({ writer: rt.writer, db: database, settings });
         await loadLookups(database, rt);
 
         setLastSyncTime(new Date());
@@ -191,6 +235,7 @@ export default function App() {
 
       await rt.sync();
       await seedIfEmpty({ writer: rt.writer, db, settings });
+      await seedBrandsIfEmpty({ writer: rt.writer, db, settings });
       await loadLookups(db, rt);
 
       setLastSyncTime(new Date());
@@ -305,6 +350,7 @@ export default function App() {
               setExpenseFiltersOverride(filters);
               setActiveTab('expenses');
             }}
+            onNavigateToUncategorized={() => setActiveTab('uncategorized')}
             onSelectExpense={(exp) => {
               setEditingExpense(exp);
               setShowModal(true);
@@ -325,6 +371,7 @@ export default function App() {
               setEditingExpense(exp);
               setShowModal(true);
             }}
+            onNavigateToUncategorized={() => setActiveTab('uncategorized')}
           />
         )}
 
@@ -341,6 +388,41 @@ export default function App() {
             onRebuildFromLogs={handleRebuildFromLogs}
             onChangeFolder={() => setAppState('onboarding')}
             onUpdateDeviceLabel={handleUpdateDeviceLabel}
+            onNavigateToRulesBrands={() => setActiveTab('rules_brands')}
+          />
+        )}
+
+        {activeTab === 'uncategorized' && (
+          <UncategorizedInbox
+            db={db}
+            writer={runtime?.writer}
+            brands={brands}
+            rules={rules}
+            categories={categories}
+            accounts={accounts}
+            onBack={() => setActiveTab('home')}
+            showToast={showToast}
+            onRefreshLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
+          />
+        )}
+
+        {activeTab === 'rules_brands' && (
+          <RulesBrandsScreen
+            db={db}
+            writer={runtime?.writer}
+            brands={brands}
+            rules={rules}
+            categories={categories}
+            accounts={accounts}
+            onBack={() => setActiveTab('settings')}
+            showToast={showToast}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
           />
         )}
       </main>
@@ -400,6 +482,8 @@ export default function App() {
           expense={editingExpense}
           categories={categories}
           accounts={accounts}
+          brands={brands}
+          rules={rules}
           writer={runtime?.writer}
           deviceId={deviceId}
           onClose={() => {

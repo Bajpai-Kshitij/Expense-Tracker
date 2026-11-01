@@ -13,6 +13,7 @@ export default function SettingsTab({
   onRebuildFromLogs,
   onChangeFolder,
   onUpdateDeviceLabel,
+  onNavigateToRulesBrands,
 }) {
   const [labelInput, setLabelInput] = useState(deviceLabel || '');
   const [isUpdatingLabel, setIsUpdatingLabel] = useState(false);
@@ -98,6 +99,23 @@ export default function SettingsTab({
             {rebuildLoading ? 'Rebuilding...' : '🔨 Rebuild'}
           </button>
         </div>
+      </div>
+
+      {/* Rules, Brands & Categories Management */}
+      <div
+        className="card"
+        onClick={onNavigateToRulesBrands}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            🏷️ Rules, Brands & Categories
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Configure auto-categorization rules, brand aliases, and category labels
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
       </div>
 
       {/* Shared Folder Section */}

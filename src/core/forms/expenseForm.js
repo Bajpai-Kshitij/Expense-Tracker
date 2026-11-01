@@ -1,5 +1,6 @@
 import { parseRupees } from '../format/money.js';
 import { generateManualExpenseId } from '../events/id.js';
+import { categorize } from '../categorize/categorize.js';
 
 const VALID_DIRECTIONS = new Set(['debit', 'credit']);
 const VALID_KINDS = new Set(['spend', 'transfer', 'income', 'fixed']);
@@ -71,18 +72,62 @@ export function validateExpenseForm(form = {}) {
 
 /**
  * Builds data object for expense.created event from validated form values.
+ * When category is Uncategorized (null), calls categorize to auto-populate
+ * brand, categoryId (unlocked), and kind.
  * 
  * @param {object} value - Validated form values.
  * @param {object} [options]
  * @param {string} [options.deviceId] - Device ID.
  * @param {() => number} [options.random=Math.random] - Random generator.
  * @param {() => number|string|Date} [options.now=() => Date.now()] - Clock.
+ * @param {object[]|object} [options.brands=[]] - Active brands list or map.
+ * @param {object[]|object} [options.rules=[]] - Active rules list or map.
+ * @param {object[]|object} [options.accounts={}] - Accounts context.
+ * @param {object[]|object} [options.categories={}] - Categories context.
  * @returns {object} Payload for expense.created event.
  */
-export function buildCreateData(value, { deviceId, random = Math.random, now = () => Date.now() } = {}) {
+export function buildCreateData(value, {
+  deviceId,
+  random = Math.random,
+  now = () => Date.now(),
+  brands = [],
+  rules = [],
+  accounts = {},
+  categories = {},
+} = {}) {
   const expenseId = generateManualExpenseId(random);
   const nowVal = typeof now === 'function' ? now() : Date.now();
   const nowIso = typeof nowVal === 'string' ? nowVal : new Date(nowVal).toISOString();
+
+  let categoryId = value.category_id !== undefined ? value.category_id : (value.categoryId || null);
+  let categoryLocked = value.category_locked !== undefined ? (value.category_locked ? 1 : 0) : (categoryId ? 1 : 0);
+  let brand = value.brand || null;
+  let kind = value.kind || 'spend';
+
+  // Auto-categorize if category is left as Uncategorized
+  if (!categoryId) {
+    const catRes = categorize(
+      {
+        merchantRaw: value.merchant_raw || value.merchant || '',
+        note: value.note || '',
+        accountId: value.account_id || value.accountId || null,
+        direction: value.direction || 'debit',
+        amountPaise: value.amount_paise,
+      },
+      { brands, rules, accounts, categories }
+    );
+
+    if (catRes.categoryId) {
+      categoryId = catRes.categoryId;
+      categoryLocked = 0; // Rule-matched: not locked
+    }
+    if (catRes.brand) {
+      brand = catRes.brand;
+    }
+    if (catRes.kind) {
+      kind = catRes.kind;
+    }
+  }
 
   return {
     expenseId,
@@ -90,11 +135,11 @@ export function buildCreateData(value, { deviceId, random = Math.random, now = (
     date: value.date,
     txn_ts: value.txn_ts || nowIso,
     direction: value.direction || 'debit',
-    kind: value.kind || 'spend',
+    kind,
     merchant_raw: value.merchant_raw || value.merchant || null,
-    brand: null,
-    category_id: value.category_id !== undefined ? value.category_id : (value.categoryId || null),
-    category_locked: value.category_id ? 1 : 0,
+    brand,
+    category_id: categoryId,
+    category_locked: categoryLocked,
     account_id: value.account_id !== undefined ? value.account_id : (value.accountId || null),
     mode: value.mode || 'card',
     source: 'manual',
@@ -181,4 +226,3 @@ export function buildPatch(original = {}, value = {}) {
 
   return Object.keys(patch).length > 0 ? patch : null;
 }
-

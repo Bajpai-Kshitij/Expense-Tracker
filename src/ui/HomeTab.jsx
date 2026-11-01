@@ -10,6 +10,7 @@ export default function HomeTab({
   includeFixed,
   setIncludeFixed,
   onNavigateToExpenses,
+  onNavigateToUncategorized,
   onSelectExpense,
 }) {
   const [loading, setLoading] = useState(true);
@@ -104,7 +105,13 @@ export default function HomeTab({
       {uncategorizedCount > 0 && (
         <div
           className="card uncategorized-card"
-          onClick={() => onNavigateToExpenses({ uncategorizedOnly: true })}
+          onClick={() => {
+            if (onNavigateToUncategorized) {
+              onNavigateToUncategorized();
+            } else {
+              onNavigateToExpenses({ uncategorizedOnly: true });
+            }
+          }}
         >
           <div>
             <h3>⚠️ {uncategorizedCount} Uncategorized {uncategorizedCount === 1 ? 'Expense' : 'Expenses'}</h3>

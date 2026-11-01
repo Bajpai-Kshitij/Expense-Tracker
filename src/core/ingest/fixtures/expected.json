@@ -1,0 +1,496 @@
+{
+  "axis_spend_multi.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 44334,
+    "accountId": "acc_axis_myzone",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "4230"
+    },
+    "date": "2026-10-03",
+    "time": "21:01:49",
+    "merchantRaw": "DISTRICT MO",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_myzone|44334|20261003210149|avl23215295",
+    "linkHint": null
+  },
+  "axis_spend_single_1.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 21000,
+    "accountId": "acc_axis_flipkart",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "3765"
+    },
+    "date": "2026-10-29",
+    "time": "12:09:17",
+    "merchantRaw": "SWIGGY PVT",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_flipkart|21000|20261029120917|avl23131658",
+    "linkHint": null
+  },
+  "axis_spend_single_2.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 28200,
+    "accountId": "acc_axis_flipkart",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "3765"
+    },
+    "date": "2026-10-24",
+    "time": "23:43:31",
+    "merchantRaw": "SWIGGY PVT",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_flipkart|28200|20261024234331|avl23152658",
+    "linkHint": null
+  },
+  "axis_spend_single_3.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 176400,
+    "accountId": "acc_axis_flipkart",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "3765"
+    },
+    "date": "2026-10-17",
+    "time": "11:06:37",
+    "merchantRaw": "MYNTRA DESI",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_flipkart|176400|20261017110637|avl23289258",
+    "linkHint": null
+  },
+  "axis_debit_cardpay_1.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 168468,
+    "accountId": "acc_axis_savings",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7693"
+    },
+    "date": "2026-10-30",
+    "time": "08:54:36",
+    "merchantRaw": "",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_savings|168468|20261030085436|CRD-PMNT-652922****7068",
+    "linkHint": {
+      "type": "card_payment",
+      "side": "bank",
+      "cardLast4": "7068"
+    }
+  },
+  "axis_debit_cardpay_2.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 150100,
+    "accountId": "acc_axis_savings",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7693"
+    },
+    "date": "2026-10-05",
+    "time": "09:15:04",
+    "merchantRaw": "",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_savings|150100|20261005091504|CRD-PMNT-440006****3765",
+    "linkHint": {
+      "type": "card_payment",
+      "side": "bank",
+      "cardLast4": "3765"
+    }
+  },
+  "axis_debit_ach.txt": {
+    "status": "parsed",
+    "kind": "fixed",
+    "direction": "debit",
+    "amountPaise": 500000,
+    "accountId": "acc_axis_savings",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7693"
+    },
+    "date": "2026-10-20",
+    "time": "07:34:28",
+    "merchantRaw": "ACH-DR-BANDHAN20102026 CAM",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_savings|500000|20261020073428|ACH-DR-BANDHAN20102026",
+    "linkHint": null
+  },
+  "axis_debit_unknown_narration.txt": {
+    "status": "unparsed",
+    "reason": "format_mismatch"
+  },
+  "axis_credit_neft_1.txt": {
+    "status": "parsed",
+    "kind": "income",
+    "direction": "credit",
+    "amountPaise": 10000000,
+    "accountId": "acc_axis_savings",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7693"
+    },
+    "date": "2026-10-04",
+    "time": "10:02:18",
+    "merchantRaw": "",
+    "refNo": "NEFT/IN00000000000001/KSHI",
+    "dedupeKey": "ref:NEFT/IN00000000000001/KSHI",
+    "linkHint": null
+  },
+  "axis_credit_neft_2.txt": {
+    "status": "parsed",
+    "kind": "income",
+    "direction": "credit",
+    "amountPaise": 10000000,
+    "accountId": "acc_axis_savings",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7693"
+    },
+    "date": "2026-08-18",
+    "time": "08:32:22",
+    "merchantRaw": "",
+    "refNo": "NEFT/IN00000000000002/KSHI",
+    "dedupeKey": "ref:NEFT/IN00000000000002/KSHI",
+    "linkHint": null
+  },
+  "axis_payrecv_1.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "credit",
+    "amountPaise": 168468,
+    "accountId": "acc_axis_indianoil",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "7068"
+    },
+    "date": "2026-10-30",
+    "time": null,
+    "merchantRaw": "",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_indianoil|168468|20261030|payrecv",
+    "linkHint": {
+      "type": "card_payment",
+      "side": "card",
+      "cardLast4": "7068"
+    }
+  },
+  "axis_payrecv_2.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "credit",
+    "amountPaise": 240063,
+    "accountId": "acc_axis_myzone",
+    "accountHint": {
+      "issuer": "axis",
+      "digits": "4230"
+    },
+    "date": "2026-10-05",
+    "time": null,
+    "merchantRaw": "",
+    "refNo": null,
+    "dedupeKey": "fp:acc_axis_myzone|240063|20261005|payrecv",
+    "linkHint": {
+      "type": "card_payment",
+      "side": "card",
+      "cardLast4": "4230"
+    }
+  },
+  "ign_otp.txt": {
+    "status": "ignored",
+    "reason": "otp"
+  },
+  "ign_charges.txt": {
+    "status": "ignored",
+    "reason": "charge_revision"
+  },
+  "ign_anniversary_1.txt": {
+    "status": "ignored",
+    "reason": "card_anniversary"
+  },
+  "ign_anniversary_2.txt": {
+    "status": "ignored",
+    "reason": "card_anniversary"
+  },
+  "ign_swiggy_notcompleted.txt": {
+    "status": "ignored",
+    "reason": "not_completed"
+  },
+  "ign_swiggy_refund_init.txt": {
+    "status": "ignored",
+    "reason": "refund_or_cancelled"
+  },
+  "ign_irctc_cancel.txt": {
+    "status": "ignored",
+    "reason": "refund_or_cancelled"
+  },
+  "ign_policybazaar_done.txt": {
+    "status": "ignored",
+    "reason": "third_party_confirmation"
+  },
+  "ign_policybazaar_due.txt": {
+    "status": "ignored",
+    "reason": "due_or_standing_instruction"
+  },
+  "unknown_chat.txt": {
+    "status": "unknown"
+  },
+  "icici_spend_1.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 45400,
+    "accountId": "acc_icici_amazonpay",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "6017"
+    },
+    "date": "2026-10-28",
+    "time": null,
+    "merchantRaw": "AMAZON PAY IN E",
+    "refNo": null,
+    "availLimitPaise": 4161408,
+    "dedupeKey": "fp:acc_icici_amazonpay|45400|20261028|avl4161408",
+    "linkHint": null
+  },
+  "icici_spend_2.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 27400,
+    "accountId": "acc_icici_amazonpay",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "6017"
+    },
+    "date": "2026-10-25",
+    "time": null,
+    "merchantRaw": "AMAZON PAY IN E",
+    "refNo": null,
+    "availLimitPaise": 4206808,
+    "dedupeKey": "fp:acc_icici_amazonpay|27400|20261025|avl4206808",
+    "linkHint": null
+  },
+  "icici_upi_wallet.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 82907,
+    "accountId": "acc_icici_savings",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "476"
+    },
+    "date": "2026-10-30",
+    "time": null,
+    "merchantRaw": "Amazon Pay on D",
+    "refNo": "630000000001",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:630000000001",
+    "linkHint": null
+  },
+  "icici_upi_person.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 15000,
+    "accountId": "acc_icici_savings",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "4476"
+    },
+    "date": "2026-10-31",
+    "time": null,
+    "merchantRaw": "RAMESH KUMAR",
+    "refNo": "111111111111",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111111",
+    "linkHint": null
+  },
+  "icici_mandate_self.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 50000,
+    "accountId": "acc_icici_savings",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "476"
+    },
+    "date": "2026-10-27",
+    "time": null,
+    "merchantRaw": "TEST OWNER",
+    "refNo": "666000000002",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:666000000002",
+    "linkHint": null
+  },
+  "icici_refund_pb.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "credit",
+    "amountPaise": 200,
+    "accountId": "acc_icici_coral",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "3001"
+    },
+    "date": "2026-07-07",
+    "time": null,
+    "merchantRaw": "POLICYBAZAAR",
+    "refNo": null,
+    "availLimitPaise": null,
+    "dedupeKey": "fp:acc_icici_coral|200|20260707|credit|policybazaar",
+    "linkHint": null
+  },
+  "icici_payrecv.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "credit",
+    "amountPaise": 3716609,
+    "accountId": null,
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "7922"
+    },
+    "date": "2026-10-22",
+    "time": null,
+    "merchantRaw": "",
+    "refNo": null,
+    "availLimitPaise": null,
+    "dedupeKey": "fp:unk-icici-7922|3716609|20261022|payrecv",
+    "linkHint": {
+      "type": "card_payment",
+      "side": "card",
+      "cardLast4": "7922",
+      "fromAccountDigits": "4476"
+    }
+  },
+  "ign_icici_si.txt": {
+    "status": "ignored",
+    "reason": "due_or_standing_instruction"
+  },
+  "icici_unknown_layout.txt": {
+    "status": "unparsed",
+    "reason": "format_mismatch"
+  },
+  "hdfc_upi_1.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 36000,
+    "accountId": "acc_hdfc_pixel",
+    "accountHint": {
+      "issuer": "hdfc",
+      "digits": null,
+      "product": "Pixel Play"
+    },
+    "date": "2026-10-27",
+    "time": "23:38:00",
+    "txnTs": "2026-10-27T23:38:00+05:30",
+    "merchantRaw": "blinkit.payu@hdfcbank",
+    "mode": "upi",
+    "refNo": "131000000001",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:131000000001",
+    "linkHint": null
+  },
+  "hdfc_upi_2.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 89400,
+    "accountId": "acc_hdfc_pixel",
+    "accountHint": {
+      "issuer": "hdfc",
+      "digits": null,
+      "product": "Pixel Play"
+    },
+    "date": "2026-10-25",
+    "time": "12:03:00",
+    "txnTs": "2026-10-25T12:03:00+05:30",
+    "merchantRaw": "blinkit2@payuaxis",
+    "mode": "upi",
+    "refNo": "131000000002",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:131000000002",
+    "linkHint": null
+  },
+  "hdfc_upi_3.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 9000,
+    "accountId": "acc_hdfc_pixel",
+    "accountHint": {
+      "issuer": "hdfc",
+      "digits": null,
+      "product": "Pixel Play"
+    },
+    "date": "2026-10-14",
+    "time": "11:20:00",
+    "txnTs": "2026-10-14T11:20:00+05:30",
+    "merchantRaw": "paytm.d94102895@pty",
+    "mode": "upi",
+    "refNo": "131000000003",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:131000000003",
+    "linkHint": null
+  },
+  "hdfc_unknown_product.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 10000,
+    "accountId": null,
+    "accountHint": {
+      "issuer": "hdfc",
+      "digits": null,
+      "product": "Regalia Gold"
+    },
+    "date": "2026-11-01",
+    "time": "09:15:00",
+    "txnTs": "2026-11-01T09:15:00+05:30",
+    "merchantRaw": "test@upi",
+    "mode": "upi",
+    "refNo": "131000000004",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:131000000004",
+    "linkHint": null
+  },
+  "hdfc_unknown_layout.txt": {
+    "status": "unparsed",
+    "reason": "format_mismatch"
+  },
+  "hdfc_flattened.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 36000,
+    "accountId": "acc_hdfc_pixel",
+    "accountHint": {
+      "issuer": "hdfc",
+      "digits": null,
+      "product": "Pixel Play"
+    },
+    "date": "2026-10-27",
+    "time": "23:38:00",
+    "txnTs": "2026-10-27T23:38:00+05:30",
+    "merchantRaw": "blinkit.payu@hdfcbank",
+    "mode": "upi",
+    "refNo": "131000000001",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:131000000001",
+    "linkHint": null
+  }
+}
