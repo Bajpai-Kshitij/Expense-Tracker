@@ -1,14 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { pickFolder } from '../native/expenseNative.js';
+import { setOnboardingProgressListener } from '../native/onboardingProgress.js';
 
-export default function Onboarding({ onComplete, isRepickMode = false, currentLabel = 'Me' }) {
+export const STEPS = ['Opening database', 'Creating device file', 'First sync', 'Seeding'];
+
+export default function Onboarding({ onComplete, isRepickMode = false, currentLabel = 'Me', initialError = '' }) {
   const [folderUri, setFolderUri] = useState('');
   const [folderName, setFolderName] = useState('');
   const [label, setLabel] = useState(currentLabel);
   const [customLabel, setCustomLabel] = useState('');
   const [isCustom, setIsCustom] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stepStates, setStepStates] = useState({});
+
+  useEffect(() => {
+    setOnboardingProgressListener(({ step, status, error: stepErr }) => {
+      setStepStates((prev) => ({ ...prev, [step]: status }));
+      if (status === 'failed') {
+        setError(`Step "${step}" failed: ${stepErr || 'Unknown error'}`);
+        setIsSubmitting(false);
+      }
+    });
+
+    return () => {
+      setOnboardingProgressListener(null);
+    };
+  }, []);
 
   const handlePick = async () => {
     try {
@@ -30,9 +48,14 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
     try {
       setIsSubmitting(true);
       setError('');
+      const initial = {};
+      for (const s of STEPS) initial[s] = 'pending';
+      setStepStates(initial);
+
       await onComplete({ folderUri, label: finalLabel });
     } catch (err) {
-      setError(`Setup failed: ${err.message}`);
+      const msg = err?.message || String(err);
+      setError(msg.startsWith('Step') || msg.startsWith('Timeout') ? msg : `Setup failed: ${msg}`);
       setIsSubmitting(false);
     }
   };
@@ -50,7 +73,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
         </p>
 
         {error && (
-          <div className="alert-banner alert-danger">
+          <div className="alert-banner alert-danger" style={{ marginBottom: '16px' }}>
             <span>{error}</span>
           </div>
         )}
@@ -67,6 +90,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
             type="button"
             className="btn btn-secondary"
             style={{ width: '100%', marginBottom: '8px' }}
+            disabled={isSubmitting}
             onClick={handlePick}
           >
             📁 {folderUri ? `Picked: ${folderName}` : 'Pick Shared Folder'}
@@ -89,6 +113,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
                 type="button"
                 className={`btn ${!isCustom && label === 'Me' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1 }}
+                disabled={isSubmitting}
                 onClick={() => { setIsCustom(false); setLabel('Me'); }}
               >
                 Me
@@ -97,6 +122,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
                 type="button"
                 className={`btn ${!isCustom && label === 'Wife' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1 }}
+                disabled={isSubmitting}
                 onClick={() => { setIsCustom(false); setLabel('Wife'); }}
               >
                 Wife
@@ -105,6 +131,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
                 type="button"
                 className={`btn ${isCustom ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1 }}
+                disabled={isSubmitting}
                 onClick={() => setIsCustom(true)}
               >
                 Custom
@@ -116,6 +143,7 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
                 className="form-input"
                 placeholder="Enter device label (e.g. Work, Tablet)"
                 value={customLabel}
+                disabled={isSubmitting}
                 onChange={(e) => setCustomLabel(e.target.value)}
                 maxLength={30}
               />
@@ -123,17 +151,90 @@ export default function Onboarding({ onComplete, isRepickMode = false, currentLa
           </div>
         )}
 
-        <button
-          type="button"
-          className="btn btn-primary"
-          style={{ width: '100%', padding: '14px' }}
-          disabled={!folderUri || isSubmitting}
-          onClick={handleFinish}
-        >
-          {isSubmitting ? 'Configuring...' : (isRepickMode ? 'Restore Folder Access' : 'Get Started')}
-        </button>
+        {/* Progress list showing the 4 steps */}
+        {(isSubmitting || Object.keys(stepStates).length > 0) && (
+          <div
+            style={{
+              marginBottom: '20px',
+              padding: '14px',
+              background: '#090d16',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color, #334155)',
+            }}
+          >
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '10px', color: 'var(--text-secondary)' }}>
+              Configuration Progress:
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {STEPS.map((step) => {
+                const state = stepStates[step] || 'pending';
+                return (
+                  <div key={step} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem' }}>
+                    {state === 'completed' && <span style={{ color: '#22c55e', fontWeight: 'bold' }}>✓</span>}
+                    {state === 'running' && <span>⏳</span>}
+                    {state === 'failed' && <span style={{ color: '#ef4444', fontWeight: 'bold' }}>✗</span>}
+                    {state === 'pending' && <span style={{ color: '#64748b' }}>○</span>}
+                    <span
+                      style={{
+                        color:
+                          state === 'completed'
+                            ? '#22c55e'
+                            : state === 'running'
+                            ? '#38bdf8'
+                            : state === 'failed'
+                            ? '#ef4444'
+                            : '#94a3b8',
+                      }}
+                    >
+                      {step}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Actions: Retry button if failed, spinner if submitting, Get Started otherwise */}
+        {error ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '14px' }}
+            disabled={!folderUri}
+            onClick={handleFinish}
+          >
+            Retry
+          </button>
+        ) : isSubmitting ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              padding: '14px',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+            disabled
+          >
+            <span>⏳</span>
+            <span>Configuring...</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '14px' }}
+            disabled={!folderUri}
+            onClick={handleFinish}
+          >
+            {isRepickMode ? 'Restore Folder Access' : 'Get Started'}
+          </button>
+        )}
       </div>
     </div>
   );
 }
-

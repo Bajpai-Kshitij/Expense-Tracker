@@ -4,6 +4,8 @@ import './styles.css';
 import { createCapacitorSqliteAdapter } from '../native/sqlite.js';
 import { checkFolder } from '../native/expenseNative.js';
 import { initRuntime } from '../native/syncRuntime.js';
+import { withTimeout } from '../native/timeout.js';
+import { logStepStart, logStepFinish } from '../native/onboardingProgress.js';
 import { migrate, settings } from '../core/db/index.js';
 import { seedIfEmpty } from '../core/seed/seed.js';
 import { seedBrandsIfEmpty } from '../core/seed/brandSeed.js';
@@ -11,13 +13,23 @@ import { seedBrandsIfEmpty } from '../core/seed/brandSeed.js';
 import Onboarding from './Onboarding.jsx';
 import HomeTab from './HomeTab.jsx';
 import ExpensesTab from './ExpensesTab.jsx';
+import ReportsTab from './reports/ReportsTab.jsx';
 import SettingsTab from './SettingsTab.jsx';
 import ExpenseModal from './ExpenseModal.jsx';
 import UncategorizedInbox from './UncategorizedInbox.jsx';
 import RulesBrandsScreen from './RulesBrandsScreen.jsx';
+import SmsImportScreen from './SmsImportScreen.jsx';
+import ReviewScreen from './ReviewScreen.jsx';
+import AccountsScreen from './AccountsScreen.jsx';
+import { countOpenReviewItems } from '../core/db/reviewQueue.js';
+import { scanSms } from '../native/smsScan.js';
+import { readSms } from '../native/expenseNative.js';
+import { rowsToState } from '../core/db/index.js';
 
 export default function App() {
-  const [appState, setAppState] = useState('loading'); // 'loading' | 'onboarding' | 'repick' | 'ready'
+  const [appState, setAppState] = useState('loading'); // 'loading' | 'onboarding' | 'repick' | 'ready' | 'startup_error'
+  const [startupError, setStartupError] = useState(null); // { step: string, message: string } | null
+  const [retryCount, setRetryCount] = useState(0);
   const [runtime, setRuntime] = useState(null);
   const [db, setDb] = useState(null);
   const [folderUri, setFolderUri] = useState('');
@@ -25,17 +37,21 @@ export default function App() {
   const [deviceId, setDeviceId] = useState('');
   const [deviceLabel, setDeviceLabel] = useState('Me');
 
-  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'expenses' | 'settings' | 'uncategorized' | 'rules_brands'
+  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'expenses' | 'settings' | 'uncategorized' | 'rules_brands' | 'sms_import' | 'review' | 'accounts'
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [brands, setBrands] = useState([]);
   const [rules, setRules] = useState([]);
   const [devices, setDevices] = useState([]);
   const [includeFixed, setIncludeFixed] = useState(false);
+  const [openReviewCount, setOpenReviewCount] = useState(0);
 
   const [expenseFiltersOverride, setExpenseFiltersOverride] = useState({});
+  const [reportsMonth, setReportsMonth] = useState(null);
+  const [reportsIncludeFixed, setReportsIncludeFixed] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [modalInitialValues, setModalInitialValues] = useState({});
 
   const [toastMessage, setToastMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -43,6 +59,8 @@ export default function App() {
   const [lastSyncIssuesCount, setLastSyncIssuesCount] = useState(0);
 
   const isSyncingRef = useRef(false);
+  const isScanningRef = useRef(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const refreshKeyRef = useRef(0);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -102,6 +120,9 @@ export default function App() {
         const devs = await currentRuntime.listDevices();
         setDevices(devs);
       }
+
+      const revCount = await countOpenReviewItems(database);
+      setOpenReviewCount(revCount);
     } catch (e) {
       console.error('Failed to load lookups:', e);
     }
@@ -111,6 +132,7 @@ export default function App() {
     if (!currentRuntime || isSyncingRef.current) return;
     try {
       isSyncingRef.current = true;
+      setIsSyncing(true);
       const summary = await currentRuntime.sync();
       setLastSyncTime(new Date());
       setLastSyncIssuesCount(summary.issues?.length || 0);
@@ -124,6 +146,7 @@ export default function App() {
       setErrorMessage(`Sync failed: ${err.message}`);
     } finally {
       isSyncingRef.current = false;
+      setIsSyncing(false);
     }
   }, [runtime, db]);
 
@@ -132,13 +155,16 @@ export default function App() {
     let isMounted = true;
 
     async function startup() {
+      let currentStep = 'Opening database';
       try {
-        const database = await createCapacitorSqliteAdapter('expense_tracker');
-        await migrate(database);
+        currentStep = 'Opening database';
+        const database = await withTimeout(createCapacitorSqliteAdapter('expense_tracker'), 15000, 'Opening database');
+        await withTimeout(migrate(database), 15000, 'Opening database');
 
         if (!isMounted) return;
         setDb(database);
 
+        currentStep = 'Reading settings';
         const savedUri = await settings.getSetting(database, 'folderUri');
         const savedLabel = await settings.getSetting(database, 'deviceLabel');
 
@@ -148,9 +174,10 @@ export default function App() {
         }
 
         // Validate folder permission
+        currentStep = 'Checking folder';
         let status = { ok: true };
         try {
-          status = await checkFolder({ uri: savedUri });
+          status = await withTimeout(checkFolder({ uri: savedUri }), 15000, 'Checking folder');
         } catch (e) {
           status = { ok: false };
         }
@@ -166,6 +193,7 @@ export default function App() {
         setFolderStatus(status);
         if (savedLabel) setDeviceLabel(savedLabel);
 
+        currentStep = 'Initializing sync';
         const rt = await initRuntime({ folderUri: savedUri });
         if (!isMounted) return;
         setRuntime(rt);
@@ -173,17 +201,65 @@ export default function App() {
         if (rt.deviceLabel) setDeviceLabel(rt.deviceLabel);
 
         // Run initial sync and seed
-        await rt.sync();
-        await seedIfEmpty({ writer: rt.writer, db: database, settings });
-        await seedBrandsIfEmpty({ writer: rt.writer, db: database, settings });
+        currentStep = 'First sync';
+        await withTimeout(rt.sync(), 15000, 'First sync');
+
+        currentStep = 'Seeding';
+        await withTimeout(seedIfEmpty({ writer: rt.writer, db: database, settings }), 15000, 'Seeding');
+        await withTimeout(seedBrandsIfEmpty({ writer: rt.writer, db: database, settings }), 15000, 'Seeding');
         await loadLookups(database, rt);
 
         setLastSyncTime(new Date());
         setAppState('ready');
+
+        // Check for 15-minute background auto-scan on app open
+        try {
+          const autoScanVal = await settings.getSetting(database, 'sms_auto_scan');
+          if (autoScanVal === 'true' || autoScanVal === '1') {
+            const lastScanMsStr = await settings.getSetting(database, 'sms_last_scan_ms');
+            const lastScanMs = lastScanMsStr ? Number(lastScanMsStr) : 0;
+            const nowMs = Date.now();
+            if (!lastScanMs || (nowMs - lastScanMs >= 15 * 60 * 1000)) {
+              if (!isSyncingRef.current && !isScanningRef.current) {
+                isScanningRef.current = true;
+                const getState = async () => {
+                  const rows = {
+                    expenses: await database.query('SELECT * FROM expenses;'),
+                    categories: await database.query('SELECT * FROM categories;'),
+                    accounts: await database.query('SELECT * FROM accounts;'),
+                    brands: await database.query('SELECT * FROM brands;'),
+                    rules: await database.query('SELECT * FROM rules;'),
+                    review_queue: await database.query('SELECT * FROM review_queue;'),
+                  };
+                  return rowsToState(rows);
+                };
+
+                scanSms({
+                  readSms,
+                  db: database,
+                  writer: rt.writer,
+                  getState,
+                })
+                  .then(async (summary) => {
+                    if (summary && summary.created > 0) {
+                      showToast(`${summary.created} new expenses from SMS`);
+                      await loadLookups(database, rt);
+                      setRefreshTick((prev) => prev + 1);
+                    }
+                  })
+                  .catch(() => {})
+                  .finally(() => {
+                    isScanningRef.current = false;
+                  });
+              }
+            }
+          }
+        } catch (e) {}
       } catch (err) {
-        console.error('Startup error:', err);
-        setErrorMessage(`Startup error: ${err.message}`);
-        setAppState('onboarding');
+        console.error(`Startup error during step "${currentStep}":`, err);
+        if (!isMounted) return;
+        setStartupError({ step: currentStep, message: err.message || String(err) });
+        setAppState('startup_error');
       }
     }
 
@@ -192,7 +268,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [retryCount]);
 
   // Periodic and Visibility Change Sync Triggers
   useEffect(() => {
@@ -220,31 +296,34 @@ export default function App() {
   }, [appState, runtime, db, triggerSync]);
 
   const handleOnboardingComplete = async ({ folderUri: newUri, label: newLabel }) => {
-    try {
-      if (!db) return;
-      await settings.setSetting(db, 'folderUri', newUri);
-      await settings.setSetting(db, 'deviceLabel', newLabel);
-
-      setFolderUri(newUri);
-      setDeviceLabel(newLabel);
-      setFolderStatus({ ok: true });
-
-      const rt = await initRuntime({ folderUri: newUri });
-      setRuntime(rt);
-      setDeviceId(rt.deviceId);
-
-      await rt.sync();
-      await seedIfEmpty({ writer: rt.writer, db, settings });
-      await seedBrandsIfEmpty({ writer: rt.writer, db, settings });
-      await loadLookups(db, rt);
-
-      setLastSyncTime(new Date());
-      setAppState('ready');
-      showToast('Setup complete');
-    } catch (err) {
-      console.error('Failed to complete setup:', err);
-      setErrorMessage(`Setup failed: ${err.message}`);
+    let database = db;
+    if (!database) {
+      logStepStart('Opening database');
+      database = await withTimeout(createCapacitorSqliteAdapter('expense_tracker'), 15000, 'Opening database');
+      await withTimeout(migrate(database), 15000, 'Opening database');
+      setDb(database);
+      logStepFinish('Opening database');
     }
+
+    await settings.setSetting(database, 'folderUri', newUri);
+    await settings.setSetting(database, 'deviceLabel', newLabel);
+
+    setFolderUri(newUri);
+    setDeviceLabel(newLabel);
+    setFolderStatus({ ok: true });
+
+    const rt = await initRuntime({ folderUri: newUri });
+    setRuntime(rt);
+    setDeviceId(rt.deviceId);
+
+    await rt.sync();
+    await seedIfEmpty({ writer: rt.writer, db: database, settings });
+    await seedBrandsIfEmpty({ writer: rt.writer, db: database, settings });
+    await loadLookups(database, rt);
+
+    setLastSyncTime(new Date());
+    setAppState('ready');
+    showToast('Setup complete');
   };
 
   const handleManualSync = async () => {
@@ -296,6 +375,31 @@ export default function App() {
     return acc;
   }, {});
 
+  if (appState === 'startup_error' || startupError) {
+    return (
+      <div className="app-shell" style={{ justifyContent: 'center', alignItems: 'center', padding: '24px' }}>
+        <div className="card" style={{ padding: '24px', width: '100%', maxWidth: '420px' }}>
+          <h1 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '12px' }}>Startup Failed</h1>
+          <div className="alert-banner alert-danger" style={{ marginBottom: '16px' }}>
+            <span>Step "{startupError?.step || 'Startup'}" failed: {startupError?.message || 'Unknown error'}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '12px' }}
+            onClick={() => {
+              setStartupError(null);
+              setAppState('loading');
+              setRetryCount((c) => c + 1);
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (appState === 'loading') {
     return (
       <div className="app-shell" style={{ justifyContent: 'center', alignItems: 'center' }}>
@@ -318,14 +422,18 @@ export default function App() {
       <header className="app-header">
         <div className="app-title-group">
           <h1>Expense Tracker</h1>
-          <span className="app-subtitle">{deviceLabel} &bull; Offline-First</span>
+          <span className="app-subtitle">
+            {deviceLabel} &bull; Offline-First
+            {isSyncing && <span style={{ marginLeft: '8px', fontSize: '0.75rem', color: '#38bdf8' }}>⟳ Syncing...</span>}
+          </span>
         </div>
         <button
           type="button"
           className="sync-button-header"
+          disabled={isSyncing}
           onClick={handleManualSync}
         >
-          🔄 Sync
+          {isSyncing ? '⏳ Syncing' : '🔄 Sync'}
         </button>
       </header>
 
@@ -338,7 +446,7 @@ export default function App() {
       )}
 
       {/* Tab Content */}
-      <main className="app-content" key={refreshTick}>
+      <main className="app-content">
         {activeTab === 'home' && (
           <HomeTab
             db={db}
@@ -346,11 +454,14 @@ export default function App() {
             accountsMap={accountsMap}
             includeFixed={includeFixed}
             setIncludeFixed={setIncludeFixed}
+            refreshTick={refreshTick}
             onNavigateToExpenses={(filters) => {
               setExpenseFiltersOverride(filters);
               setActiveTab('expenses');
             }}
             onNavigateToUncategorized={() => setActiveTab('uncategorized')}
+            onNavigateToReview={() => setActiveTab('review')}
+            onNavigateToSmsImport={() => setActiveTab('sms_import')}
             onSelectExpense={(exp) => {
               setEditingExpense(exp);
               setShowModal(true);
@@ -367,11 +478,31 @@ export default function App() {
             categoriesMap={categoriesMap}
             accountsMap={accountsMap}
             initialFilters={expenseFiltersOverride}
+            refreshTick={refreshTick}
             onSelectExpense={(exp) => {
               setEditingExpense(exp);
               setShowModal(true);
             }}
             onNavigateToUncategorized={() => setActiveTab('uncategorized')}
+          />
+        )}
+
+        {activeTab === 'reports' && (
+          <ReportsTab
+            db={db}
+            categories={categories}
+            accounts={accounts}
+            devices={devices}
+            initialMonth={reportsMonth}
+            onMonthChange={setReportsMonth}
+            initialIncludeFixed={reportsIncludeFixed}
+            onIncludeFixedChange={setReportsIncludeFixed}
+            onNavigateToExpenses={(filters) => {
+              setExpenseFiltersOverride(filters);
+              setActiveTab('expenses');
+            }}
+            onNavigateToUncategorized={() => setActiveTab('uncategorized')}
+            refreshTick={refreshTick}
           />
         )}
 
@@ -384,11 +515,15 @@ export default function App() {
             devices={devices}
             lastSyncTime={lastSyncTime}
             lastSyncIssuesCount={lastSyncIssuesCount}
+            openReviewCount={openReviewCount}
             onSyncNow={handleManualSync}
             onRebuildFromLogs={handleRebuildFromLogs}
             onChangeFolder={() => setAppState('onboarding')}
             onUpdateDeviceLabel={handleUpdateDeviceLabel}
             onNavigateToRulesBrands={() => setActiveTab('rules_brands')}
+            onNavigateToSmsImport={() => setActiveTab('sms_import')}
+            onNavigateToAccounts={() => setActiveTab('accounts')}
+            onNavigateToReview={() => setActiveTab('review')}
           />
         )}
 
@@ -417,6 +552,54 @@ export default function App() {
             rules={rules}
             categories={categories}
             accounts={accounts}
+            onBack={() => setActiveTab('settings')}
+            showToast={showToast}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
+          />
+        )}
+
+        {activeTab === 'sms_import' && (
+          <SmsImportScreen
+            db={db}
+            writer={runtime?.writer}
+            onBack={() => setActiveTab('settings')}
+            onNavigateToReview={() => setActiveTab('review')}
+            showToast={showToast}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
+          />
+        )}
+
+        {activeTab === 'review' && (
+          <ReviewScreen
+            db={db}
+            writer={runtime?.writer}
+            accounts={accounts}
+            categoriesMap={categoriesMap}
+            accountsMap={accountsMap}
+            onBack={() => setActiveTab('settings')}
+            onAddManually={(prefill) => {
+              setModalInitialValues(prefill);
+              setEditingExpense(null);
+              setShowModal(true);
+            }}
+            showToast={showToast}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
+          />
+        )}
+
+        {activeTab === 'accounts' && (
+          <AccountsScreen
+            accounts={accounts}
+            writer={runtime?.writer}
             onBack={() => setActiveTab('settings')}
             showToast={showToast}
             onReloadLookups={async () => {
@@ -468,6 +651,15 @@ export default function App() {
 
         <button
           type="button"
+          className={`tab-btn ${activeTab === 'reports' ? 'active' : ''}`}
+          onClick={() => setActiveTab('reports')}
+        >
+          <span className="tab-icon">📊</span>
+          <span>Reports</span>
+        </button>
+
+        <button
+          type="button"
           className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
         >
@@ -480,6 +672,7 @@ export default function App() {
       {showModal && (
         <ExpenseModal
           expense={editingExpense}
+          initialValues={modalInitialValues}
           categories={categories}
           accounts={accounts}
           brands={brands}
@@ -489,10 +682,12 @@ export default function App() {
           onClose={() => {
             setShowModal(false);
             setEditingExpense(null);
+            setModalInitialValues({});
           }}
           onSuccess={async (msg) => {
             setShowModal(false);
             setEditingExpense(null);
+            setModalInitialValues({});
             showToast(msg);
             await loadLookups(db, runtime);
             setRefreshTick((prev) => prev + 1);

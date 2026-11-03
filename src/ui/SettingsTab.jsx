@@ -14,6 +14,10 @@ export default function SettingsTab({
   onChangeFolder,
   onUpdateDeviceLabel,
   onNavigateToRulesBrands,
+  onNavigateToSmsImport,
+  onNavigateToAccounts,
+  onNavigateToReview,
+  openReviewCount = 0,
 }) {
   const [labelInput, setLabelInput] = useState(deviceLabel || '');
   const [isUpdatingLabel, setIsUpdatingLabel] = useState(false);
@@ -113,6 +117,57 @@ export default function SettingsTab({
           </h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Configure auto-categorization rules, brand aliases, and category labels
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
+      </div>
+
+      {/* SMS Import */}
+      <div
+        className="card"
+        onClick={onNavigateToSmsImport}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            💬 SMS Import
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Configure senders, scan inbox, and auto-import bank SMS
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
+      </div>
+
+      {/* Accounts Screen */}
+      <div
+        className="card"
+        onClick={onNavigateToAccounts}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            💳 Accounts
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Manage bank accounts, credit cards, and cash wallets
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
+      </div>
+
+      {/* Review Queue */}
+      <div
+        className="card"
+        onClick={onNavigateToReview}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            📋 Review Queue {openReviewCount > 0 ? `(${openReviewCount})` : ''}
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Resolve unknown accounts, duplicate transactions, and unparsed SMS
           </p>
         </div>
         <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>

@@ -28,19 +28,44 @@ export function matchAccount(issuer, digits, accounts) {
     : [];
 
   const candidates = accList.filter((acc) => {
-    if (!acc || !acc.issuer || !acc.lastDigits) return false;
-    const accIssuer = String(acc.issuer).trim().toLowerCase();
-    if (accIssuer !== targetIssuer) return false;
+    if (!acc) return false;
 
-    const accDigitsStr = String(acc.lastDigits).trim();
-    if (accDigitsStr.length < 3) return false;
-    const accSuffix = accDigitsStr.slice(-3);
+    // 1. Primary account matching
+    if (acc.issuer && acc.lastDigits) {
+      const accIssuer = String(acc.issuer).trim().toLowerCase();
+      const accDigitsStr = String(acc.lastDigits).trim();
+      if (accDigitsStr.length >= 3) {
+        const accSuffix = accDigitsStr.slice(-3);
+        if (accIssuer === targetIssuer && accSuffix === targetSuffix) {
+          return true;
+        }
+      }
+    }
 
-    return accSuffix === targetSuffix;
+    // 2. Alias matching
+    if (Array.isArray(acc.aliases)) {
+      for (const alias of acc.aliases) {
+        if (!alias || !alias.issuer || !alias.digits) continue;
+        const aliasIssuer = String(alias.issuer).trim().toLowerCase();
+        const aliasDigitsStr = String(alias.digits).trim();
+        if (aliasDigitsStr.length >= 3) {
+          const aliasSuffix = aliasDigitsStr.slice(-3);
+          if (aliasIssuer === targetIssuer && aliasSuffix === targetSuffix) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   });
 
-  if (candidates.length === 1) {
-    return candidates[0].id || null;
+  const uniqueCandidateIds = Array.from(
+    new Set(candidates.map((c) => c.id || c.accountId).filter(Boolean))
+  );
+
+  if (uniqueCandidateIds.length === 1) {
+    return uniqueCandidateIds[0];
   }
 
   return null;

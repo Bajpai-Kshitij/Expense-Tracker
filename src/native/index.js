@@ -31,6 +31,7 @@ export function getPlatform() {
   return window.Capacitor?.getPlatform?.() || 'web';
 }
 
-export { createCapacitorSqliteAdapter } from './sqlite.js';
+export { createCapacitorSqliteAdapter, createSqliteAdapterFromDb, clearSqliteAdapterCache } from './sqlite.js';
+export { withTimeout } from './timeout.js';
 
 

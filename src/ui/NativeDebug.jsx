@@ -12,32 +12,50 @@ import { initRuntime } from '../native/syncRuntime.js';
 import { createEvent, serializeEvent } from '../core/events/event.js';
 import { expenseIdFromDedupeKey } from '../core/events/id.js';
 import { listExpenses, totals, settings } from '../core/db/queries.js';
+import { rowsToState } from '../core/db/index.js';
 import { parseSms } from '../core/ingest/index.js';
 import { maskForSharing } from '../core/ingest/mask.js';
+import { listSenders } from '../core/ingest/senders.js';
+import { scanSms } from '../native/smsScan.js';
+import { assignAccountAlias, listReviewItems, countOpenReviewItems } from '../core/ingest/review.js';
+import StatementProbe from './StatementProbe.jsx';
 
 export default function NativeDebug() {
+  const [showStatementProbe, setShowStatementProbe] = useState(false);
   const [folderUri, setFolderUri] = useState(
     () => localStorage.getItem('debug_folder_uri') || ''
   );
   const [ownerNamesInput, setOwnerNamesInput] = useState('');
   const [isSavingOwnerNames, setIsSavingOwnerNames] = useState(false);
+  const [smsSendersInput, setSmsSendersInput] = useState('');
+  const [isSavingSenders, setIsSavingSenders] = useState(false);
+  const [aliasIssuer, setAliasIssuer] = useState('');
+  const [aliasDigits, setAliasDigits] = useState('');
+  const [aliasAccountId, setAliasAccountId] = useState('');
   const [maskedUnparsedList, setMaskedUnparsedList] = useState(null);
   const [copyStatus, setCopyStatus] = useState('');
   const [output, setOutput] = useState('Native Debug Output will appear here...');
   const runtimeRef = useRef(null);
 
   useEffect(() => {
-    async function loadOwnerNames() {
+    async function loadSettings() {
       try {
         if (!folderUri) return;
         const rt = runtimeRef.current || (await getRuntime());
         if (rt?.db) {
           const val = await settings.getSetting(rt.db, 'owner_names');
           if (val) setOwnerNamesInput(val);
+          const sendersVal = await settings.getSetting(rt.db, 'sms_senders');
+          if (sendersVal) {
+            try {
+              const arr = JSON.parse(sendersVal);
+              if (Array.isArray(arr)) setSmsSendersInput(arr.join(', '));
+            } catch {}
+          }
         }
       } catch (e) {}
     }
-    loadOwnerNames();
+    loadSettings();
   }, [folderUri]);
 
   const handleSaveOwnerNames = async () => {
@@ -50,6 +68,23 @@ export default function NativeDebug() {
       log(`Failed to save owner names: ${err.message}`);
     } finally {
       setIsSavingOwnerNames(false);
+    }
+  };
+
+  const handleSaveSmsSenders = async () => {
+    try {
+      setIsSavingSenders(true);
+      const rt = await getRuntime();
+      const senders = smsSendersInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await settings.setSetting(rt.db, 'sms_senders', JSON.stringify(senders));
+      log(`Saved ${senders.length} SMS senders to sms_senders: [${senders.join(', ')}]`);
+    } catch (err) {
+      log(`Failed to save sms senders: ${err.message}`);
+    } finally {
+      setIsSavingSenders(false);
     }
   };
 
@@ -429,6 +464,160 @@ export default function NativeDebug() {
     }
   };
 
+  const handlePrintRawFirstRow = async () => {
+    try {
+      const runtime = await getRuntime();
+      const list = await listExpenses(runtime.db);
+      if (list.length === 0) {
+        log('Print raw first row: No expenses found in database');
+        return;
+      }
+      const first = list[0];
+      const sanitized = {};
+      for (const [k, v] of Object.entries(first)) {
+        if (['merchant_raw', 'note', 'ref_no'].includes(k)) {
+          sanitized[k] = typeof v === 'string' ? `[text len=${v.length}]` : v;
+        } else {
+          sanitized[k] = v;
+        }
+      }
+      log({ rawFirstRow: sanitized });
+    } catch (err) {
+      log(`Print raw first row failed: ${err.message}`);
+    }
+  };
+
+  const handleListSenders = async () => {
+    try {
+      const messages = await readSms({ limit: 300 });
+      const rt = await getRuntime();
+      const accountsRows = await rt.db.query('SELECT * FROM accounts;');
+      const state = rowsToState({ accounts: accountsRows });
+      const senders = listSenders(messages, { accounts: state.accounts });
+      log(
+        senders.map(
+          (s) => `${s.address}: ${s.financial} financial, ${s.total} total`
+        )
+      );
+    } catch (err) {
+      log(`List senders failed: ${err.message}`);
+    }
+  };
+
+  const handleScanSmsNow = async () => {
+    if (
+      !window.confirm(
+        'Scan SMS now and write expenses? This will process your messages into expenses.'
+      )
+    ) {
+      return;
+    }
+    try {
+      const rt = await getRuntime();
+      const summary = await scanSms({
+        readSms,
+        db: rt.db,
+        writer: rt.writer,
+        getState: async () => {
+          const expenses = await rt.db.query('SELECT * FROM expenses;');
+          const categories = await rt.db.query('SELECT * FROM categories;');
+          const brands = await rt.db.query('SELECT * FROM brands;');
+          const rules = await rt.db.query('SELECT * FROM rules;');
+          const accounts = await rt.db.query('SELECT * FROM accounts;');
+          const review_queue = await rt.db.query('SELECT * FROM review_queue;');
+          return rowsToState({
+            expenses,
+            categories,
+            brands,
+            rules,
+            accounts,
+            review_queue,
+          });
+        },
+      });
+      log({ scanSummary: summary });
+    } catch (err) {
+      log(`Scan SMS failed: ${err.message} (${err.code || 'UNKNOWN'})`);
+    }
+  };
+
+  const handleShowReviewCounts = async () => {
+    try {
+      const rt = await getRuntime();
+      const items = await listReviewItems(rt.db);
+      const total = await countOpenReviewItems(rt.db);
+      const byType = {};
+      for (const item of items) {
+        byType[item.type] = (byType[item.type] || 0) + 1;
+      }
+      log({ totalOpenReviews: total, byType });
+    } catch (err) {
+      log(`Show review counts failed: ${err.message}`);
+    }
+  };
+
+  const handleAssignAlias = async () => {
+    try {
+      if (!aliasIssuer || !aliasDigits || !aliasAccountId) {
+        log('Error: Fill issuer, digits, and accountId first.');
+        return;
+      }
+      const rt = await getRuntime();
+      const accounts = await rt.db.query('SELECT * FROM accounts;');
+      const brands = await rt.db.query('SELECT * FROM brands;');
+      const rules = await rt.db.query('SELECT * FROM rules;');
+      const state = rowsToState({ accounts, brands, rules });
+      const summary = await assignAccountAlias({
+        issuer: aliasIssuer.trim(),
+        digits: aliasDigits.trim(),
+        accountId: aliasAccountId.trim(),
+        writer: rt.writer,
+        state,
+        db: rt.db,
+      });
+      log({
+        assignAliasResult: summary || 'Alias assigned, no held messages found',
+      });
+    } catch (err) {
+      log(`Assign alias failed: ${err.message}`);
+    }
+  };
+
+  const handleInboxProbe = async () => {
+    try {
+      log('Running Inbox probe (last 90 days, limit 2000)...');
+      const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const messages = await readSms({ sinceEpochMs: ninetyDaysAgo, limit: 2000, order: 'desc' });
+      const total = Array.isArray(messages) ? messages.length : 0;
+      let nonEmptyAddress = 0;
+      let nonEmptyBody = 0;
+      let numericDate = 0;
+      for (const m of messages || []) {
+        if (m && typeof m.address === 'string' && m.address.trim().length > 0) nonEmptyAddress++;
+        if (m && typeof m.body === 'string' && m.body.trim().length > 0) nonEmptyBody++;
+        if (m && typeof m.date === 'number' && !isNaN(m.date)) numericDate++;
+      }
+      const firstKeys = messages && messages.length > 0 && typeof messages[0] === 'object' && messages[0] !== null
+        ? Object.keys(messages[0])
+        : [];
+
+      const probeResult = {
+        totalMessages: total,
+        nonEmptyAddressCount: nonEmptyAddress,
+        nonEmptyBodyCount: nonEmptyBody,
+        numericDateCount: numericDate,
+        firstObjectKeys: firstKeys,
+      };
+      log(`Inbox Probe Result:\n${JSON.stringify(probeResult, null, 2)}`);
+    } catch (err) {
+      log(`Inbox probe failed: ${err.message} (${err.code || 'UNKNOWN'})`);
+    }
+  };
+
+  if (showStatementProbe) {
+    return <StatementProbe onBack={() => setShowStatementProbe(false)} initialOwnerNames={ownerNamesInput} />;
+  }
+
   return (
     <div className="card" style={{ marginTop: '16px' }}>
       <h2>Native & Sync Debug (P3/P4)</h2>
@@ -462,6 +651,89 @@ export default function NativeDebug() {
         </button>
       </div>
 
+      {/* P7e-1 Senders Allowlist */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="SMS senders (comma separated)"
+          value={smsSendersInput}
+          onChange={(e) => setSmsSendersInput(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '8px 12px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color, #334155)',
+            background: 'var(--bg-input, #0f172a)',
+            color: 'var(--text-primary, #f8fafc)',
+            fontSize: '0.875rem',
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleSaveSmsSenders}
+          disabled={isSavingSenders}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {isSavingSenders ? 'Saving...' : 'Save senders'}
+        </button>
+      </div>
+
+      {/* P7e-1 Assign Alias Inputs */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="Issuer (e.g. icici)"
+          value={aliasIssuer}
+          onChange={(e) => setAliasIssuer(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '6px 8px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color, #334155)',
+            background: 'var(--bg-input, #0f172a)',
+            color: 'var(--text-primary, #f8fafc)',
+            fontSize: '0.8rem',
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Digits/Product"
+          value={aliasDigits}
+          onChange={(e) => setAliasDigits(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '6px 8px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color, #334155)',
+            background: 'var(--bg-input, #0f172a)',
+            color: 'var(--text-primary, #f8fafc)',
+            fontSize: '0.8rem',
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Account ID"
+          value={aliasAccountId}
+          onChange={(e) => setAliasAccountId(e.target.value)}
+          style={{
+            flex: 1.5,
+            padding: '6px 8px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color, #334155)',
+            background: 'var(--bg-input, #0f172a)',
+            color: 'var(--text-primary, #f8fafc)',
+            fontSize: '0.8rem',
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleAssignAlias}
+          style={{ whiteSpace: 'nowrap', fontSize: '0.8rem', padding: '6px 10px' }}
+        >
+          Assign alias
+        </button>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
         <button type="button" onClick={handlePickFolder}>Pick folder</button>
         <button type="button" onClick={handleCheckFolder}>Check folder</button>
@@ -486,6 +758,22 @@ export default function NativeDebug() {
         <button type="button" onClick={handleRebuildFromLogs}>Rebuild from logs</button>
         <button type="button" onClick={handleWriteFakeOtherDeviceFile}>Write fake other-device file</button>
         <button type="button" onClick={handleShowExpenseCountAndTotal}>Show expense count and total</button>
+        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handlePrintRawFirstRow}>
+          Print raw first row of listExpenses (debug)
+        </button>
+
+        {/* Phase P7e-1 SMS Pipeline Debug */}
+        <button type="button" onClick={handleListSenders}>List senders</button>
+        <button type="button" onClick={handleShowReviewCounts}>Show review counts by type</button>
+        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleScanSmsNow}>
+          Scan SMS now (writes!)
+        </button>
+        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleInboxProbe}>
+          Inbox probe
+        </button>
+        <button type="button" style={{ gridColumn: 'span 2' }} onClick={() => setShowStatementProbe(true)}>
+          Statement probe
+        </button>
       </div>
 
       {maskedUnparsedList !== null && (

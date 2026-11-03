@@ -88,24 +88,28 @@ public class ExpenseNativePlugin extends Plugin {
 
     @PluginMethod
     public void pickFolder(PluginCall call) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(
-            Intent.FLAG_GRANT_READ_URI_PERMISSION |
-            Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
-            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-        );
-        startActivityForResult(call, intent, "pickFolderCallback");
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            );
+            startActivityForResult(call, intent, "pickFolderCallback");
+        } catch (Throwable t) {
+            call.reject("Failed to start folder picker: " + t.getMessage(), "PICK_ERROR", new Exception(t));
+        }
     }
 
     @ActivityCallback
     private void pickFolderCallback(PluginCall call, ActivityResult result) {
-        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
-            call.reject("User cancelled folder picker", "CANCELLED");
-            return;
-        }
-
-        Uri treeUri = result.getData().getData();
         try {
+            if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
+                call.reject("User cancelled folder picker", "CANCELLED");
+                return;
+            }
+
+            Uri treeUri = result.getData().getData();
             final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
             getContext().getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
 
@@ -118,8 +122,8 @@ public class ExpenseNativePlugin extends Plugin {
             ret.put("uri", treeUri.toString());
             ret.put("name", name != null ? name : "ExpenseSync");
             call.resolve(ret);
-        } catch (Exception e) {
-            call.reject("Failed to persist folder permission: " + e.getMessage(), "PERMISSION_ERROR", e);
+        } catch (Throwable t) {
+            call.reject("Failed to persist folder permission: " + t.getMessage(), "PERMISSION_ERROR", new Exception(t));
         }
     }
 
@@ -152,7 +156,7 @@ public class ExpenseNativePlugin extends Plugin {
                     Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId);
                     try (Cursor c = resolver.query(docUri, new String[]{ DocumentsContract.Document.COLUMN_DOCUMENT_ID }, null, null, null)) {
                         accessible = (c != null && c.moveToFirst());
-                    } catch (Exception ignored) {
+                    } catch (Throwable ignored) {
                         accessible = false;
                     }
                 }
@@ -162,12 +166,8 @@ public class ExpenseNativePlugin extends Plugin {
                 ret.put("canRead", hasRead);
                 ret.put("canWrite", hasWrite);
                 call.resolve(ret);
-            } catch (Exception e) {
-                JSObject ret = new JSObject();
-                ret.put("ok", false);
-                ret.put("canRead", false);
-                ret.put("canWrite", false);
-                call.resolve(ret);
+            } catch (Throwable t) {
+                call.reject("Failed to check folder: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }
@@ -227,8 +227,8 @@ public class ExpenseNativePlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("files", files);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to list files: " + e.getMessage(), "IO_ERROR", e);
+            } catch (Throwable t) {
+                call.reject("Failed to list files: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }
@@ -273,8 +273,8 @@ public class ExpenseNativePlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("text", text);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to read file: " + e.getMessage(), "IO_ERROR", e);
+            } catch (Throwable t) {
+                call.reject("Failed to read file: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }
@@ -345,7 +345,7 @@ public class ExpenseNativePlugin extends Plugin {
                                 baos.write(buffer, 0, read);
                             }
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Throwable ignored) {}
                     baos.write(lineBytes);
                     byte[] fullContent = baos.toByteArray();
 
@@ -363,8 +363,8 @@ public class ExpenseNativePlugin extends Plugin {
                 ret.put("mode", modeUsed);
                 ret.put("bytes", lineBytes.length);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to append line: " + e.getMessage(), "IO_ERROR", e);
+            } catch (Throwable t) {
+                call.reject("Failed to append line: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }
@@ -413,27 +413,43 @@ public class ExpenseNativePlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("bytes", bytes.length);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to write file: " + e.getMessage(), "IO_ERROR", e);
+            } catch (Throwable t) {
+                call.reject("Failed to write file: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }
 
     @PluginMethod
     public void readSms(PluginCall call) {
-        if (getPermissionState("sms") != PermissionState.GRANTED) {
-            requestPermissionForAlias("sms", call, "smsPermissionCallback");
-        } else {
-            readSmsInternal(call);
+        try {
+            if (getPermissionState("sms") == PermissionState.DENIED) {
+                call.reject("SMS permission was denied", "PERMISSION_DENIED");
+                return;
+            }
+            if (getPermissionState("sms") != PermissionState.GRANTED) {
+                requestPermissionForAlias("sms", call, "smsPermissionCallback");
+            } else {
+                readSmsInternal(call);
+            }
+        } catch (Throwable t) {
+            if (t instanceof SecurityException || (t.getMessage() != null && t.getMessage().toLowerCase().contains("permission"))) {
+                call.reject("SMS permission was denied", "PERMISSION_DENIED", new Exception(t));
+            } else {
+                call.reject("Failed to check SMS permission: " + t.getMessage(), "SMS_ERROR", new Exception(t));
+            }
         }
     }
 
     @PermissionCallback
     private void smsPermissionCallback(PluginCall call) {
-        if (getPermissionState("sms") == PermissionState.GRANTED) {
-            readSmsInternal(call);
-        } else {
-            call.reject("SMS permission was denied", "PERMISSION_DENIED");
+        try {
+            if (getPermissionState("sms") == PermissionState.GRANTED) {
+                readSmsInternal(call);
+            } else {
+                call.reject("SMS permission was denied", "PERMISSION_DENIED");
+            }
+        } catch (Throwable t) {
+            call.reject("Error in SMS permission callback: " + t.getMessage(), "SMS_ERROR", new Exception(t));
         }
     }
 
@@ -449,12 +465,14 @@ public class ExpenseNativePlugin extends Plugin {
                 if (limit <= 0) limit = 500;
                 if (limit > 2000) limit = 2000;
 
+                String orderParam = call.getString("order");
+                String sortOrder = "desc".equalsIgnoreCase(orderParam) ? "date DESC" : "date ASC";
+
                 ContentResolver resolver = getContext().getContentResolver();
                 Uri inboxUri = Uri.parse("content://sms/inbox");
                 String[] projection = new String[]{ "_id", "address", "body", "date" };
                 String selection = "date > ?";
                 String[] selectionArgs = new String[]{ String.valueOf(since) };
-                String sortOrder = "date ASC";
 
                 cursor = resolver.query(inboxUri, projection, selection, selectionArgs, sortOrder);
                 JSArray smsList = new JSArray();
@@ -480,11 +498,17 @@ public class ExpenseNativePlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("sms", smsList);
                 call.resolve(ret);
-            } catch (Exception e) {
-                call.reject("Failed to read SMS: " + e.getMessage(), "SMS_ERROR", e);
+            } catch (Throwable t) {
+                if (t instanceof SecurityException || (t.getMessage() != null && t.getMessage().toLowerCase().contains("permission"))) {
+                    call.reject("SMS permission was denied", "PERMISSION_DENIED", new Exception(t));
+                } else {
+                    call.reject("Failed to read SMS: " + t.getMessage(), "SMS_ERROR", new Exception(t));
+                }
             } finally {
                 if (cursor != null) {
-                    cursor.close();
+                    try {
+                        cursor.close();
+                    } catch (Throwable ignored) {}
                 }
             }
         });

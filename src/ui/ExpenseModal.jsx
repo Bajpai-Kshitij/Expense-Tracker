@@ -4,6 +4,7 @@ import { getTodayIst } from '../core/format/dates.js';
 
 export default function ExpenseModal({
   expense = null, // if present, edit mode; if null, add mode
+  initialValues = {},
   categories = [],
   accounts = [],
   brands = [],
@@ -14,21 +15,22 @@ export default function ExpenseModal({
   onSuccess,
 }) {
   const isEdit = Boolean(expense);
+  const isSmsImported = isEdit && expense?.source === 'sms';
 
   const initialAmount = expense && typeof expense.amount_paise === 'number'
     ? (expense.amount_paise / 100).toString()
-    : '';
+    : (initialValues?.amount || '');
 
   const [form, setForm] = useState({
     amount: initialAmount,
-    date: expense?.date || getTodayIst(),
-    direction: expense?.direction || 'debit',
-    kind: expense?.kind || 'spend',
-    categoryId: expense?.category_id || '',
-    accountId: expense?.account_id || (accounts[0]?.id || ''),
-    mode: expense?.mode || 'card',
-    merchant: expense?.merchant_raw || '',
-    note: expense?.note || '',
+    date: expense?.date || initialValues?.date || getTodayIst(),
+    direction: expense?.direction || initialValues?.direction || 'debit',
+    kind: expense?.kind || initialValues?.kind || 'spend',
+    categoryId: expense?.category_id || initialValues?.categoryId || '',
+    accountId: expense?.account_id || initialValues?.accountId || (accounts[0]?.id || ''),
+    mode: expense?.mode || initialValues?.mode || 'card',
+    merchant: expense?.merchant_raw || initialValues?.merchant || '',
+    note: expense?.note || initialValues?.note || '',
   });
 
   const [errors, setErrors] = useState({});
@@ -44,6 +46,15 @@ export default function ExpenseModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!writer) return;
+
+    if (isSmsImported) {
+      const amountChanged = form.amount !== initialAmount;
+      const dateChanged = form.date !== expense.date;
+      if (amountChanged || dateChanged) {
+        const confirmed = window.confirm('This was imported from your message. Change it anyway?');
+        if (!confirmed) return;
+      }
+    }
 
     const validation = validateExpenseForm(form);
     if (!validation.ok) {
@@ -109,6 +120,12 @@ export default function ExpenseModal({
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
+            {isSmsImported && (
+              <div style={{ fontSize: '0.8rem', color: '#38bdf8', marginBottom: '12px', background: 'var(--bg-secondary)', padding: '6px 10px', borderRadius: '4px' }}>
+                Imported from SMS{expense.ref_no || expense.refNo ? ` · ref ${expense.ref_no || expense.refNo}` : ''}
+              </div>
+            )}
+
             {errors.form && (
               <div className="alert-banner alert-danger">
                 <span>{errors.form}</span>

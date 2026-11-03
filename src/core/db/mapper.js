@@ -10,25 +10,30 @@ export function stateToRows(state) {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((exp) => ({
       id: exp.id,
-      amount_paise: exp.amountPaise !== undefined ? exp.amountPaise : null,
+      amount_paise:
+        exp.amount_paise !== undefined
+          ? exp.amount_paise
+          : exp.amountPaise !== undefined
+          ? exp.amountPaise
+          : null,
       date: exp.date || null,
-      txn_ts: exp.txnTs || exp.createdAt || null,
+      txn_ts: exp.txn_ts || exp.txnTs || exp.createdAt || null,
       direction: exp.direction || 'debit',
       kind: exp.kind || 'spend',
-      merchant_raw: exp.merchantRaw || null,
+      merchant_raw: exp.merchant_raw !== undefined ? exp.merchant_raw : (exp.merchantRaw || null),
       brand: exp.brand || null,
-      category_id: exp.categoryId || null,
-      category_locked: exp.categoryLocked ? 1 : 0,
-      account_id: exp.accountId || null,
+      category_id: exp.category_id !== undefined ? exp.category_id : (exp.categoryId || null),
+      category_locked: (exp.category_locked !== undefined ? exp.category_locked : exp.categoryLocked) ? 1 : 0,
+      account_id: exp.account_id !== undefined ? exp.account_id : (exp.accountId || null),
       mode: exp.mode || null,
       source: exp.source || null,
-      ref_no: exp.refNo || null,
-      dedupe_key: exp.dedupeKey || null,
+      ref_no: exp.ref_no !== undefined ? exp.ref_no : (exp.refNo || null),
+      dedupe_key: exp.dedupe_key !== undefined ? exp.dedupe_key : (exp.dedupeKey || null),
       note: exp.note || null,
-      status: exp.deleted ? 'deleted' : 'active',
+      status: exp.deleted ? 'deleted' : (exp.status || 'active'),
       field_ts: JSON.stringify(exp.field_ts || {}),
-      created_by_dev: exp.createdDev || null,
-      merged_into: exp.mergedInto || null,
+      created_by_dev: exp.created_by_dev !== undefined ? exp.created_by_dev : (exp.createdDev || null),
+      merged_into: exp.merged_into !== undefined ? exp.merged_into : (exp.mergedInto || null),
     }));
 
   const categories = Object.values(state.categories || {})
@@ -141,7 +146,7 @@ export function rowsToState(rows = {}) {
     };
 
     if (row.amount_paise !== null && row.amount_paise !== undefined) {
-      exp.amountPaise = row.amount_paise;
+      exp.amountPaise = Number(row.amount_paise);
     }
     if (row.date !== null && row.date !== undefined) exp.date = row.date;
     if (row.direction !== null && row.direction !== undefined) exp.direction = row.direction;

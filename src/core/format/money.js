@@ -76,12 +76,13 @@ export function parseRupees(input) {
  * @returns {string} Formatted Indian currency string.
  */
 export function formatPaise(paise) {
-  if (typeof paise !== 'number' || !Number.isFinite(paise)) {
+  const num = typeof paise === 'string' && /^-?\d+(\.\d+)?$/.test(paise.trim()) ? Number(paise) : paise;
+  if (typeof num !== 'number' || !Number.isFinite(num)) {
     return '₹0.00';
   }
 
-  const isNegative = paise < 0;
-  const absPaise = Math.abs(Math.round(paise));
+  const isNegative = num < 0;
+  const absPaise = Math.abs(Math.round(num));
   const rupees = Math.floor(absPaise / 100);
   const remainder = absPaise % 100;
   const paiseStr = String(remainder).padStart(2, '0');

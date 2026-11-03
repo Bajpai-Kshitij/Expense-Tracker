@@ -211,6 +211,7 @@ export async function readSms(options = {}) {
   const result = await ExpenseNative.readSms({
     sinceEpochMs: options.sinceEpochMs || 0,
     limit: options.limit || 500,
+    order: options.order || 'asc',
   });
-  return result?.sms || [];
+  return Array.isArray(result) ? result : (result?.sms || result?.messages || []);
 }

@@ -4,6 +4,8 @@ import { createSyncStorage } from './syncStorage.js';
 import { ensureDevice } from '../core/sync/device.js';
 import { createWriter } from '../core/sync/writer.js';
 import { syncNow, rebuildFromLogs } from '../core/sync/engine.js';
+import { withTimeout } from './timeout.js';
+import { logStepStart, logStepFinish, logStepError } from './onboardingProgress.js';
 
 /**
  * Lists all known devices by scanning device-*.json metadata files in the shared storage folder.
@@ -54,23 +56,62 @@ export async function initRuntime({ folderUri, databaseName = 'expense_tracker' 
     throw new Error('folderUri is required to initialize sync runtime');
   }
 
-  const db = await createCapacitorSqliteAdapter(databaseName);
-  await migrate(db);
+  logStepStart('Opening database');
+  let db;
+  try {
+    db = await withTimeout(createCapacitorSqliteAdapter(databaseName), 15000, 'Opening database');
+    await withTimeout(migrate(db), 15000, 'Opening database');
+    logStepFinish('Opening database');
+  } catch (err) {
+    logStepError('Opening database', err);
+    throw err;
+  }
 
-  const storage = createSyncStorage(folderUri);
-  const { deviceId, label } = await ensureDevice({ db, storage });
+  logStepStart('Creating device file');
+  let storage, deviceId, label, writer;
+  try {
+    storage = createSyncStorage(folderUri);
+    const dev = await withTimeout(ensureDevice({ db, storage }), 15000, 'Creating device file');
+    deviceId = dev.deviceId;
+    label = dev.label;
 
-  const writer = createWriter({ deviceId, storage, db });
-  await writer.init();
+    writer = createWriter({ deviceId, storage, db });
+    await withTimeout(writer.init(), 15000, 'Creating device file');
+    logStepFinish('Creating device file');
+  } catch (err) {
+    logStepError('Creating device file', err);
+    throw err;
+  }
+
+  const wrappedWriter = {
+    ...writer,
+    async write(type, data) {
+      return withTimeout(writer.write(type, data), 15000, 'Seeding');
+    },
+  };
 
   return {
     deviceId,
     deviceLabel: label,
     db,
     storage,
-    writer,
-    sync: (full = false) => syncNow({ storage, db, deviceId, full }),
+    writer: wrappedWriter,
+    sync: async (full = false) => {
+      logStepStart('First sync');
+      try {
+        const res = await withTimeout(syncNow({ storage, db, deviceId, full }), 15000, 'First sync');
+        logStepFinish('First sync');
+        logStepStart('Seeding');
+        return res;
+      } catch (err) {
+        logStepError('First sync', err);
+        throw err;
+      }
+    },
     rebuild: () => rebuildFromLogs({ storage, db }),
-    listDevices: () => listDevices(storage),
+    listDevices: async () => {
+      logStepFinish('Seeding');
+      return withTimeout(listDevices(storage), 15000, 'Seeding');
+    },
   };
 }

@@ -14,6 +14,7 @@ export default function ExpensesTab({
   initialFilters = {},
   onSelectExpense,
   onNavigateToUncategorized,
+  refreshTick = 0,
 }) {
   const [filterState, setFilterState] = useState({
     preset: initialFilters.preset || 'this_month',
@@ -24,7 +25,8 @@ export default function ExpensesTab({
     mode: initialFilters.mode || 'all',
     createdByDev: initialFilters.createdByDev || 'all',
     text: initialFilters.text || '',
-    includeFixed: Boolean(initialFilters.includeFixed),
+    typeFilter: initialFilters.typeFilter || 'spend_fixed', // 'spend_fixed' | 'spend' | 'fixed' | 'transfer' | 'income' | 'all'
+    includeFixed: true,
     limit: 50,
   });
 
@@ -32,29 +34,49 @@ export default function ExpensesTab({
   const [totalsData, setTotalsData] = useState({ netPaise: 0, count: 0 });
   const [loading, setLoading] = useState(true);
 
-  // Sync initialFilters if changed externally (e.g. from Home tab's uncategorized card)
+  // Sync initialFilters if changed externally (e.g. from Home tab or Reports tab)
   useEffect(() => {
-    if (initialFilters.uncategorizedOnly) {
-      setFilterState((prev) => ({
-        ...prev,
-        categoryId: '__uncategorized__',
-        preset: 'all_time',
-      }));
-    }
+    if (!initialFilters || Object.keys(initialFilters).length === 0) return;
+    setFilterState((prev) => {
+      const next = { ...prev };
+      if (initialFilters.preset !== undefined) next.preset = initialFilters.preset;
+      if (initialFilters.from !== undefined) next.from = initialFilters.from;
+      if (initialFilters.to !== undefined) next.to = initialFilters.to;
+      if (initialFilters.categoryId !== undefined) next.categoryId = initialFilters.categoryId;
+      if (initialFilters.uncategorizedOnly) {
+        next.categoryId = '__uncategorized__';
+        if (!initialFilters.from && !initialFilters.to) {
+          next.preset = 'all_time';
+        }
+      }
+      if (initialFilters.accountId !== undefined) next.accountId = initialFilters.accountId;
+      if (initialFilters.mode !== undefined) next.mode = initialFilters.mode;
+      if (initialFilters.createdByDev !== undefined) next.createdByDev = initialFilters.createdByDev;
+      if (initialFilters.text !== undefined) next.text = initialFilters.text;
+      if (initialFilters.typeFilter !== undefined) next.typeFilter = initialFilters.typeFilter;
+      if (initialFilters.includeFixed !== undefined) {
+        next.typeFilter = initialFilters.includeFixed ? 'spend_fixed' : 'spend';
+      }
+      next.limit = 50;
+      return next;
+    });
   }, [initialFilters]);
 
-  const loadExpenses = async () => {
+  const loadExpenses = async (isInitial = false) => {
     if (!db) return;
     try {
-      setLoading(true);
-      const normalized = normalizeFilters(filterState);
+      if (isInitial) setLoading(true);
+      const normalized = normalizeFilters({
+        ...filterState,
+        includeFixed: filterState.typeFilter === 'spend_fixed' || filterState.typeFilter === 'fixed' || filterState.typeFilter === 'all',
+      });
 
       // Query totals of filtered set
       const tot = await totals(db, normalized);
       setTotalsData(tot);
 
-      // Query expenses with current limit
-      const list = await listExpenses(db, normalized);
+      // Query expenses with current limit, always fetching all kinds so in-memory typeFilter works
+      const list = await listExpenses(db, { ...normalized, includeFixed: true });
       setExpenses(list);
     } catch (err) {
       console.error('Failed to load expenses list:', err);
@@ -63,9 +85,28 @@ export default function ExpensesTab({
     }
   };
 
+  const displayedExpenses = expenses.filter((exp) => {
+    if (filterState.typeFilter === 'spend_fixed') {
+      return exp.kind === 'spend' || exp.kind === 'fixed';
+    }
+    if (filterState.typeFilter === 'spend') {
+      return exp.kind === 'spend';
+    }
+    if (filterState.typeFilter === 'fixed') {
+      return exp.kind === 'fixed';
+    }
+    if (filterState.typeFilter === 'transfer') {
+      return exp.kind === 'transfer';
+    }
+    if (filterState.typeFilter === 'income') {
+      return exp.kind === 'income';
+    }
+    return true; // 'all'
+  });
+
   useEffect(() => {
-    loadExpenses();
-  }, [db, filterState]);
+    loadExpenses(expenses.length === 0);
+  }, [db, filterState, refreshTick]);
 
   const handleFilterChange = (key, val) => {
     setFilterState((prev) => ({
@@ -124,6 +165,22 @@ export default function ExpensesTab({
               <option value="last_month">Last Month</option>
               <option value="custom">Custom Range</option>
               <option value="all_time">All Time</option>
+            </select>
+          </div>
+
+          {/* Type / Kind Filter */}
+          <div>
+            <select
+              className="filter-select"
+              value={filterState.typeFilter}
+              onChange={(e) => handleFilterChange('typeFilter', e.target.value)}
+            >
+              <option value="spend_fixed">Spend + Fixed</option>
+              <option value="spend">Spend</option>
+              <option value="fixed">Fixed</option>
+              <option value="transfer">Transfer</option>
+              <option value="income">Income</option>
+              <option value="all">All</option>
             </select>
           </div>
 
@@ -240,17 +297,21 @@ export default function ExpensesTab({
 
       {/* Expenses List */}
       <div className="card" style={{ padding: '8px 16px' }}>
-        {expenses.length === 0 ? (
+        {displayedExpenses.length === 0 ? (
           <div className="state-box">
             <h3>No matching expenses</h3>
             <p>Try adjusting your search or filters.</p>
           </div>
         ) : (
           <div>
-            {expenses.map((exp) => {
+            {displayedExpenses.map((exp) => {
               const catName = categoriesMap[exp.category_id]?.name || 'Uncategorized';
               const accName = accountsMap[exp.account_id]?.name || '';
               const isCredit = exp.direction === 'credit';
+              const linkId = exp.linkId || exp.link_id;
+              const counterpartCount = linkId
+                ? expenses.filter((e) => (e.linkId || e.link_id) === linkId && e.id !== exp.id).length
+                : 0;
 
               return (
                 <div
@@ -272,11 +333,23 @@ export default function ExpensesTab({
                     <div className={`expense-amount ${isCredit ? 'credit' : 'debit'}`}>
                       {isCredit ? '+' : ''}{formatPaise(exp.amount_paise)}
                     </div>
-                    {exp.kind !== 'spend' && (
-                      <span className={`badge badge-${exp.kind}`}>
-                        {exp.kind}
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '2px' }}>
+                      {exp.kind !== 'spend' && (
+                        <span className={`badge badge-${exp.kind}`}>
+                          {exp.kind}
+                        </span>
+                      )}
+                      {exp.source === 'sms' && (
+                        <span className="badge badge-sms" style={{ background: '#0284c7', color: '#fff', fontSize: '0.65rem', padding: '1px 4px', borderRadius: '4px' }}>
+                          SMS
+                        </span>
+                      )}
+                      {exp.kind === 'transfer' && counterpartCount > 0 && (
+                        <span style={{ fontSize: '0.65rem', color: 'var(--accent-primary)', fontWeight: 600 }}>
+                          🔗 {counterpartCount} {counterpartCount === 1 ? 'linked' : 'linked'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

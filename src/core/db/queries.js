@@ -90,7 +90,16 @@ export async function listExpenses(db, filters = {}) {
     }
   }
 
-  return db.query(sql, params);
+  const rows = await db.query(sql, params);
+  return (rows || []).map((row) => {
+    const rawAmt = row.amount_paise !== undefined ? row.amount_paise : row.amountPaise;
+    const amountPaise = rawAmt !== null && rawAmt !== undefined ? Number(rawAmt) : 0;
+    return {
+      ...row,
+      amount_paise: amountPaise,
+      amountPaise: amountPaise,
+    };
+  });
 }
 
 /**
@@ -116,10 +125,10 @@ export async function totals(db, filters = {}) {
 
   const rows = await db.query(sql, params);
   const row = rows[0] || {};
-  const spendPaise = Number(row.spend_paise || 0);
-  const refundPaise = Number(row.refund_paise || 0);
+  const spendPaise = Number(row.spend_paise ?? row.SPEND_PAISE ?? 0);
+  const refundPaise = Number(row.refund_paise ?? row.REFUND_PAISE ?? 0);
   const netPaise = spendPaise - refundPaise;
-  const count = Number(row.count || 0);
+  const count = Number(row.count ?? row.COUNT ?? 0);
 
   return { spendPaise, refundPaise, netPaise, count };
 }
@@ -149,15 +158,15 @@ export async function totalsByCategory(db, filters = {}) {
   `;
 
   const rows = await db.query(sql, params);
-  return rows.map((r) => {
-    const spendPaise = Number(r.spend_paise || 0);
-    const refundPaise = Number(r.refund_paise || 0);
+  return (rows || []).map((r) => {
+    const spendPaise = Number(r.spend_paise ?? r.SPEND_PAISE ?? 0);
+    const refundPaise = Number(r.refund_paise ?? r.REFUND_PAISE ?? 0);
     return {
-      categoryId: r.category_id,
+      categoryId: r.category_id !== undefined ? r.category_id : (r.CATEGORY_ID !== undefined ? r.CATEGORY_ID : null),
       spendPaise,
       refundPaise,
       netPaise: spendPaise - refundPaise,
-      count: Number(r.count || 0),
+      count: Number(r.count ?? r.COUNT ?? 0),
     };
   });
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { totals, totalsByCategory, listExpenses, uncategorizedInbox } from '../core/db/queries.js';
+import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { formatPaise } from '../core/format/money.js';
 import { getThisMonthRange, formatDateDisplay } from '../core/format/dates.js';
 
@@ -11,18 +12,22 @@ export default function HomeTab({
   setIncludeFixed,
   onNavigateToExpenses,
   onNavigateToUncategorized,
+  onNavigateToReview,
+  onNavigateToSmsImport,
   onSelectExpense,
+  refreshTick = 0,
 }) {
   const [loading, setLoading] = useState(true);
   const [totalData, setTotalData] = useState({ netPaise: 0, spendPaise: 0, count: 0 });
   const [catChartData, setCatChartData] = useState([]);
   const [recentExpenses, setRecentExpenses] = useState([]);
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  const [openReviewCount, setOpenReviewCount] = useState(0);
 
-  const loadData = async () => {
+  const loadData = async (isInitial = false) => {
     if (!db) return;
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const { from, to } = getThisMonthRange();
 
       // 1. Net spend this month
@@ -60,7 +65,11 @@ export default function HomeTab({
       const uncat = await uncategorizedInbox(db);
       setUncategorizedCount(uncat.length);
 
-      // 4. Last 5 expenses
+      // 4. Open review items count
+      const openRev = await countOpenReviewItems(db);
+      setOpenReviewCount(openRev);
+
+      // 5. Last 5 expenses
       const recent = await listExpenses(db, { limit: 5 });
       setRecentExpenses(recent);
     } catch (err) {
@@ -71,8 +80,8 @@ export default function HomeTab({
   };
 
   useEffect(() => {
-    loadData();
-  }, [db, includeFixed]);
+    loadData(recentExpenses.length === 0);
+  }, [db, includeFixed, refreshTick]);
 
   const maxCatSpend = catChartData.reduce((max, c) => Math.max(max, c.spendPaise), 1);
 
@@ -100,6 +109,44 @@ export default function HomeTab({
           {totalData.count} transactions in {new Date().toLocaleString('default', { month: 'long' })}
         </p>
       </div>
+
+      {/* Quick Actions / Scan SMS Link */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+          onClick={onNavigateToSmsImport}
+        >
+          💬 Scan SMS
+        </button>
+      </div>
+
+      {/* Review Alert Card */}
+      {openReviewCount > 0 && (
+        <div
+          className="card"
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderLeft: '4px solid var(--accent-primary)',
+            marginBottom: '12px',
+          }}
+          onClick={onNavigateToReview}
+        >
+          <div>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: 'var(--accent-primary)' }}>
+              📋 {openReviewCount} {openReviewCount === 1 ? 'item needs' : 'items need'} review
+            </h3>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Unknown accounts, duplicates or unparsed SMS
+            </p>
+          </div>
+          <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)' }}>➔</span>
+        </div>
+      )}
 
       {/* Uncategorized Alert Card */}
       {uncategorizedCount > 0 && (
