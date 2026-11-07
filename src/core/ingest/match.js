@@ -143,3 +143,6 @@ export function findManualCandidates({ txn, expenses = [] }) {
   return candidates.map((c) => c.id || c.expenseId);
 }
 
+export { findStatementMatch } from '../statements/import/match.js';
+
+

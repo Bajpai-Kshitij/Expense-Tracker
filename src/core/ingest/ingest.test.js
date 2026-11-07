@@ -5,7 +5,7 @@ import { parseSms, registerParser, getParsers } from './index.js';
 import { axisParser } from './issuers/axis.js';
 import { iciciParser } from './issuers/icici.js';
 import { hdfcParser } from './issuers/hdfc.js';
-import { parseAmountToPaise, parseDateToken, parseTimeToken, toTxnTs, prepareBody } from './normalize.js';
+import { parseAmountToPaise, parseDateToken, parseTimeToken, toTxnTs, prepareBody, isHouseholdName } from './normalize.js';
 import { matchAccount } from './accounts.js';
 import { formatAccountKey, formatCompactDateTime } from './keys.js';
 import { SEED_ACCOUNTS } from '../seed/seed.js';
@@ -16,7 +16,7 @@ const expectedResults = JSON.parse(
 );
 
 describe('PHASE P7a/P7b - SMS Ingest Framework & Parsers', () => {
-  const context = { accounts: SEED_ACCOUNTS, ownerNames: ['Test Owner'] };
+  const context = { accounts: SEED_ACCOUNTS, ownerNames: ['Test Owner', 'Test Owner Longname'] };
 
   describe('Fixtures Parameterized Tests', () => {
     const fixtureNames = Object.keys(expectedResults);
@@ -591,6 +591,48 @@ describe('PHASE P7a/P7b - SMS Ingest Framework & Parsers', () => {
         expect(iciciParser.detect(prep.flat)).toBe(true);
         expect(hdfcParser.detect(prep.flat)).toBe(false);
       }
+    });
+  });
+
+  describe('isHouseholdName', () => {
+    it('matches identical names ignoring case, collapsed spaces, and punctuation', () => {
+      expect(isHouseholdName('TEST OWNER LONGNAME', ['Test Owner Longname'])).toBe(true);
+      expect(isHouseholdName('  test   owner   longname  ', ['Test Owner Longname'])).toBe(true);
+      expect(isHouseholdName('Test-Owner Longname.', ['Test Owner Longname'])).toBe(true);
+      expect(isHouseholdName('TEST OWNER LONGNAME', 'Test Owner Longname')).toBe(true);
+    });
+
+    it('matches when one is a prefix of the other and the shorter has at least 8 characters', () => {
+      // Shorter is 15 chars (>= 8)
+      expect(isHouseholdName('TEST OWNER LONG', ['Test Owner Longname'])).toBe(true);
+      expect(isHouseholdName('Test Owner Longname', ['TEST OWNER LONG'])).toBe(true);
+      // Shorter is 8 chars (>= 8)
+      expect(isHouseholdName('12345678', ['123456789'])).toBe(true);
+      // Shorter is 7 chars (< 8) -> should not match prefix
+      expect(isHouseholdName('TEST OW', ['Test Owner Longname'])).toBe(false);
+      expect(isHouseholdName('Test Owner Longname', ['TEST OW'])).toBe(false);
+    });
+
+    it('returns false for non-matching names or empty household names', () => {
+      expect(isHouseholdName('PERSON ONE', ['Test Owner Longname'])).toBe(false);
+      expect(isHouseholdName('M S KALYANG BAK', ['Test Owner Longname'])).toBe(false);
+      expect(isHouseholdName('TEST OWNER LONGNAME', [])).toBe(false);
+      expect(isHouseholdName('TEST OWNER LONGNAME', null)).toBe(false);
+      expect(isHouseholdName('', ['Test Owner Longname'])).toBe(false);
+      expect(isHouseholdName(null, ['Test Owner Longname'])).toBe(false);
+    });
+
+    it('classifies joint_debit_household as spend and joint_credit_household as income when ownerNames is empty', () => {
+      const debitBody = fs.readFileSync(path.join(FIXTURES_DIR, 'joint_debit_household.txt'), 'utf-8');
+      const creditBody = fs.readFileSync(path.join(FIXTURES_DIR, 'joint_credit_household.txt'), 'utf-8');
+
+      const debitRes = parseSms({ address: 'VM-ICICIB', date: 1793400000000, body: debitBody }, { accounts: SEED_ACCOUNTS, ownerNames: [] });
+      expect(debitRes.status).toBe('parsed');
+      expect(debitRes.txn.kind).toBe('spend');
+
+      const creditRes = parseSms({ address: 'VM-ICICIB', date: 1793400000000, body: creditBody }, { accounts: SEED_ACCOUNTS, ownerNames: [] });
+      expect(creditRes.status).toBe('parsed');
+      expect(creditRes.txn.kind).toBe('income');
     });
   });
 

@@ -348,3 +348,63 @@ export async function addedByTotals(db, filters = {}) {
   }));
 }
 
+/**
+ * Aggregates uncounted totals (transfers out, transfers in, income) for active expenses.
+ * 
+ * @param {object} db
+ * @param {object} [filters={}]
+ * @returns {Promise<{ transfersOutPaise: number, transfersInPaise: number, incomePaise: number }>}
+ */
+export async function uncountedTotals(db, filters = {}) {
+  const conditions = ["e.status = 'active'"];
+  const params = [];
+
+  const from = filters.from || (filters.fromMonth ? `${filters.fromMonth}-01` : null);
+  const to = filters.to || (filters.toMonth ? `${filters.toMonth}-31` : null);
+
+  if (from) {
+    conditions.push('e.date >= ?');
+    params.push(from);
+  }
+  if (to) {
+    conditions.push('e.date <= ?');
+    params.push(to);
+  }
+
+  if (filters.accountId) {
+    conditions.push('e.account_id = ?');
+    params.push(filters.accountId);
+  }
+
+  if (filters.owner) {
+    if (filters.owner === 'Unassigned') {
+      conditions.push(
+        "(e.account_id IS NULL OR json_extract(a.extras, '$.owner') NOT IN ('Me', 'Wife', 'Joint') OR json_extract(a.extras, '$.owner') IS NULL)"
+      );
+    } else {
+      conditions.push("json_extract(a.extras, '$.owner') = ?");
+      params.push(filters.owner);
+    }
+  }
+
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+  const sql = `
+    SELECT
+      COALESCE(SUM(CASE WHEN e.kind = 'transfer' AND e.direction = 'debit' THEN e.amount_paise ELSE 0 END), 0) AS transfersOutPaise,
+      COALESCE(SUM(CASE WHEN e.kind = 'transfer' AND e.direction = 'credit' THEN e.amount_paise ELSE 0 END), 0) AS transfersInPaise,
+      COALESCE(SUM(CASE WHEN e.kind = 'income' THEN e.amount_paise ELSE 0 END), 0) AS incomePaise
+    FROM expenses e
+    LEFT JOIN accounts a ON e.account_id = a.id
+    ${whereClause};
+  `;
+
+  const rows = await db.query(sql, params);
+  const row = rows[0] || {};
+  return {
+    transfersOutPaise: Number(row.transfersOutPaise ?? row.TRANSFERSOUTPAISE ?? 0),
+    transfersInPaise: Number(row.transfersInPaise ?? row.TRANSFERSINPAISE ?? 0),
+    incomePaise: Number(row.incomePaise ?? row.INCOMEPAISE ?? 0),
+  };
+}
+

@@ -252,11 +252,18 @@ export default function HomeTab({
                     <div className={`expense-amount ${isCredit ? 'credit' : 'debit'}`}>
                       {isCredit ? '+' : ''}{formatPaise(exp.amount_paise)}
                     </div>
-                    {exp.kind !== 'spend' && (
-                      <span className={`badge badge-${exp.kind}`}>
-                        {exp.kind}
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '2px', justifyContent: 'flex-end' }}>
+                      {exp.kind !== 'spend' && (
+                        <span className={`badge badge-${exp.kind}`}>
+                          {exp.kind}
+                        </span>
+                      )}
+                      {(exp.kind === 'transfer' || exp.kind === 'income') && (
+                        <span className="badge badge-not-counted" style={{ background: 'var(--bg-tertiary, #e2e8f0)', color: 'var(--text-secondary, #64748b)', fontSize: '0.65rem', padding: '1px 5px', borderRadius: '4px' }}>
+                          Not counted
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

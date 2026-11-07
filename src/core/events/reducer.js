@@ -5,6 +5,7 @@ const KNOWN_EVENT_TYPES = new Set([
   'expense.updated',
   'expense.deleted',
   'expense.merged',
+  'expense.linked',
   'category.upserted',
   'brand.upserted',
   'rule.upserted',
@@ -82,7 +83,7 @@ function applySingleEvent(event, state) {
         // Expense already exists (e.g. same deterministic id created on two devices)
         // Merge without creating a second one, preserving tombstone if already deleted
         for (const [key, value] of Object.entries(data)) {
-          if (key === 'expenseId') continue;
+          if (key === 'expenseId' || key === 'linkedKeys') continue;
           if (!existing.deleted) {
             const existingMeta = existing.field_ts[key];
             const newMeta = { ts, dev };
@@ -92,18 +93,49 @@ function applySingleEvent(event, state) {
             }
           }
         }
+        if (!existing.linkedKeys) {
+          existing.linkedKeys = new Set();
+        }
+        if (data.dedupeKey) {
+          existing.linkedKeys.add(data.dedupeKey);
+        }
+        if (data.statementKey) {
+          existing.linkedKeys.add(data.statementKey);
+        }
+        if (data.linkedKeys) {
+          for (const k of data.linkedKeys) {
+            existing.linkedKeys.add(k);
+          }
+        }
+
+        // Deterministic createdAt and createdDev: earliest create timestamp wins
+        const tsExisting = typeof existing.createdAt === 'number' ? existing.createdAt : Date.parse(existing.createdAt || 0);
+        const tsNew = typeof ts === 'number' ? ts : Date.parse(ts || 0);
+        if (tsNew < tsExisting || (tsNew === tsExisting && dev < (existing.createdDev || ''))) {
+          existing.createdAt = ts;
+          existing.createdDev = dev;
+        }
       } else {
         const field_ts = {};
         const expenseFields = {};
         for (const [key, value] of Object.entries(data)) {
-          if (key === 'expenseId') continue;
+          if (key === 'expenseId' || key === 'linkedKeys') continue;
           expenseFields[key] = value;
           field_ts[key] = { ts, dev };
+        }
+
+        const linkedKeys = new Set(data.linkedKeys || []);
+        if (data.dedupeKey) {
+          linkedKeys.add(data.dedupeKey);
+        }
+        if (data.statementKey) {
+          linkedKeys.add(data.statementKey);
         }
 
         state.expenses[expenseId] = {
           id: expenseId,
           ...expenseFields,
+          linkedKeys,
           deleted: false,
           field_ts,
           createdAt: ts,
@@ -129,6 +161,7 @@ function applySingleEvent(event, state) {
       const patch = data.patch ? data.patch : { ...data };
       delete patch.expenseId;
       delete patch.id;
+      delete patch.linkedKeys;
 
       for (const [key, value] of Object.entries(patch)) {
         const existingMeta = existing.field_ts[key];
@@ -137,6 +170,15 @@ function applySingleEvent(event, state) {
           existing[key] = value;
           existing.field_ts[key] = newMeta;
         }
+      }
+      if (!existing.linkedKeys) {
+        existing.linkedKeys = new Set();
+      }
+      if (patch.statementKey) {
+        existing.linkedKeys.add(patch.statementKey);
+      }
+      if (patch.dedupeKey) {
+        existing.linkedKeys.add(patch.dedupeKey);
       }
       return { status: 'applied' };
     }
@@ -167,6 +209,32 @@ function applySingleEvent(event, state) {
       dropExpense.mergedInto = keepId;
       dropExpense.deletedAt = ts;
       dropExpense.deletedDev = dev;
+      return { status: 'applied' };
+    }
+
+    case 'expense.linked': {
+      const expenseId = data.expenseId || data.id;
+      const key = data.key;
+      if (!expenseId || !key) {
+        state.warnings.push({ eventId: event.id, reason: 'expense.linked missing expenseId or key' });
+        return { status: 'skipped' };
+      }
+
+      const existing = state.expenses[expenseId];
+      if (!existing) {
+        // Unknown expense: park until expense.created arrives
+        return { status: 'parked' };
+      }
+
+      if (existing.deleted) {
+        // Ignored on deleted expense
+        return { status: 'applied' };
+      }
+
+      if (!existing.linkedKeys) {
+        existing.linkedKeys = new Set();
+      }
+      existing.linkedKeys.add(key);
       return { status: 'applied' };
     }
 
@@ -233,9 +301,13 @@ export function applyEvents(state = createEmptyState(), events = []) {
   // Deep clone collections to enforce immutability
   const expenses = {};
   for (const [id, exp] of Object.entries(state.expenses || {})) {
+    const linkedKeys = new Set(exp.linkedKeys || []);
+    if (exp.dedupeKey) linkedKeys.add(exp.dedupeKey);
+    if (exp.statementKey) linkedKeys.add(exp.statementKey);
     expenses[id] = {
       ...exp,
       field_ts: { ...(exp.field_ts || {}) },
+      linkedKeys,
     };
   }
 

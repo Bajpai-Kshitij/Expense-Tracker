@@ -121,21 +121,30 @@ export function categorize(input = {}, context = {}) {
       continue;
     }
 
-    // Target category check: skipped if missing or archived
-    const targetCat = getCategory(context.categories, r.categoryId);
-    if (!targetCat || targetCat.archived) {
+    // Target category / kind check:
+    // Rules may set a category (which must exist and not be archived),
+    // or set a kind without a category (categoryId null when kind is set).
+    if (r.categoryId) {
+      const targetCat = getCategory(context.categories, r.categoryId);
+      if (!targetCat || targetCat.archived) {
+        continue;
+      }
+      categoryId = r.categoryId;
+      kind = r.kind || null;
+      matchedRuleId = r.id;
+      break;
+    } else if (r.kind) {
+      categoryId = null;
+      kind = r.kind;
+      matchedRuleId = r.id;
+      break;
+    } else {
       continue;
     }
-
-    // Rule matched! First match wins
-    categoryId = r.categoryId;
-    kind = r.kind || null;
-    matchedRuleId = r.id;
-    break;
   }
 
   // Step (c): Fallback to brand's category if no rule matched
-  if (!categoryId && matchedBrand && matchedBrand.categoryId) {
+  if (!categoryId && !matchedRuleId && matchedBrand && matchedBrand.categoryId) {
     const brandCat = getCategory(context.categories, matchedBrand.categoryId);
     if (brandCat && !brandCat.archived) {
       categoryId = matchedBrand.categoryId;
@@ -246,17 +255,15 @@ export function planReapply(expenses = [], context = {}) {
 
     if (res.categoryId) {
       patch.category_id = res.categoryId;
-      if (res.brand && res.brand !== exp.brand) {
-        patch.brand = res.brand;
-      }
-      if (res.kind && res.kind !== exp.kind) {
-        patch.kind = res.kind;
-      }
-      // Rule-applied categories are NOT locked
-      updates.push({ expenseId: exp.id, patch });
-    } else if (res.brand && !exp.brand) {
-      // Fill missing brand if available
+    }
+    if (res.brand && res.brand !== exp.brand) {
       patch.brand = res.brand;
+    }
+    if (res.kind && res.kind !== exp.kind) {
+      patch.kind = res.kind;
+    }
+
+    if (Object.keys(patch).length > 0) {
       updates.push({ expenseId: exp.id, patch });
     }
   }

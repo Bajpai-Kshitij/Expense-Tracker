@@ -4,7 +4,9 @@ import { resolve } from 'node:path';
 
 import { createSqljsAdapter } from './testing/sqljsAdapter.js';
 import {
+  MIGRATIONS,
   migrate,
+  findExpenseIdByKey,
   stateToRows,
   rowsToState,
   rebuildFromEvents,
@@ -32,7 +34,7 @@ describe('PHASE P2 - SQLite Read Model', () => {
     it('Migrations create the schema from empty; running them twice is safe', async () => {
       // 1. Run migrations on fresh database
       const ver1 = await migrate(db);
-      expect(ver1).toBe(1);
+      expect(ver1).toBe(MIGRATIONS.length);
 
       // Verify tables exist by inserting test rows
       await db.exec("INSERT INTO settings (key, value) VALUES ('test_key', 'test_val');");
@@ -41,11 +43,44 @@ describe('PHASE P2 - SQLite Read Model', () => {
 
       // 2. Run migrations second time (idempotent / no-op)
       const ver2 = await migrate(db);
-      expect(ver2).toBe(1);
+      expect(ver2).toBe(MIGRATIONS.length);
 
       // Verify existing data remains untouched
       const settingAfter = await settings.getSetting(db, 'test_key');
       expect(settingAfter).toBe('test_val');
+    });
+
+    it('upgrades older database from v1 to v2 safely', async () => {
+      // Manually run migration 1 only
+      await db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);');
+      await MIGRATIONS[0].up(db);
+      await db.exec('INSERT INTO schema_version (version) VALUES (1);');
+
+      // Insert an expense in v1 schema
+      await db.exec(`
+        INSERT INTO expenses (id, amount_paise, date, direction, kind)
+        VALUES ('exp_v1', 5000, '2026-11-01', 'debit', 'spend');
+      `);
+
+      // Run migrate to upgrade to v2
+      const finalVer = await migrate(db);
+      expect(finalVer).toBe(2);
+
+      // Verify v2 columns and table exist
+      const tableInfo = await db.query('PRAGMA table_info(expenses);');
+      const cols = tableInfo.map((c) => c.name);
+      expect(cols).toContain('statement_key');
+      expect(cols).toContain('statement_file_hash');
+
+      // Check expense_keys table is functional
+      await db.exec("INSERT INTO expense_keys (key, expense_id) VALUES ('st_key_1', 'exp_v1');");
+      const found = await db.query("SELECT expense_id FROM expense_keys WHERE key = 'st_key_1';");
+      expect(found[0]?.expense_id).toBe('exp_v1');
+
+      const byKey = await findExpenseIdByKey(db, 'st_key_1');
+      expect(byKey).toBe('exp_v1');
+      const missingKey = await findExpenseIdByKey(db, 'non_existent');
+      expect(missingKey).toBeNull();
     });
   });
 

@@ -6,4 +6,10 @@ export {
   planReapply,
   applyPlan,
 } from './categorize.js';
+export {
+  rulePriorityComparator,
+  planRenumberRules,
+  getNewRulePriority,
+  swapRulePriorities,
+} from './rules.js';
 

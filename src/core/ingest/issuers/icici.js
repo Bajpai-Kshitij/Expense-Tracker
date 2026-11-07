@@ -1,17 +1,7 @@
-import { parseAmountToPaise, parseDateToken } from '../normalize.js';
+import { parseAmountToPaise, parseDateToken, isHouseholdName } from '../normalize.js';
 import { matchAccount } from '../accounts.js';
 import { formatAccountKey } from '../keys.js';
 import { registerParser } from '../registry.js';
-
-function matchesOwner(name, ownerNames) {
-  if (!name || !Array.isArray(ownerNames) || ownerNames.length === 0) return false;
-  const cleanName = name.trim().toLowerCase().replace(/\s+/g, ' ');
-  return ownerNames.some((o) => {
-    if (typeof o !== 'string') return false;
-    const cleanO = o.trim().toLowerCase().replace(/\s+/g, ' ');
-    return cleanO && cleanName === cleanO;
-  });
-}
 
 export const iciciParser = {
   issuer: 'icici',
@@ -79,7 +69,8 @@ export const iciciParser = {
       if (amountPaise && date) {
         const accountId = matchAccount('icici', digits, accounts);
         const isWallet = /^amazon\s+pay/i.test(payee);
-        const kind = isWallet ? 'transfer' : 'spend';
+        const isHousehold = isHouseholdName(payee, ownerNames);
+        const kind = (isWallet || isHousehold) ? 'transfer' : 'spend';
 
         return {
           issuer: 'icici',
@@ -116,7 +107,7 @@ export const iciciParser = {
 
       if (amountPaise && date) {
         const accountId = matchAccount('icici', digits, accounts);
-        const isSelf = matchesOwner(name, ownerNames);
+        const isSelf = isHouseholdName(name, ownerNames);
         const kind = isSelf ? 'transfer' : 'fixed';
 
         return {
@@ -217,6 +208,44 @@ export const iciciParser = {
             cardLast4: cardDigits,
             fromAccountDigits,
           },
+          source: 'sms',
+        };
+      }
+    }
+
+    // Layout F: Savings Account UPI Credit
+    // "Dear Customer, Acct XX<3 or 4 digits> is credited with Rs <amt> on <dd-Mon-yy> from <NAME>. UPI:<12 digits>-ICICI Bank."
+    const upiCreditMatch = flat.match(
+      /Dear\s+Customer,\s+Acct\s+XX(\d{3,4})\s+is\s+credited\s+with\s+(?:Rs\.?|INR)\s*([\d,.]+)\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})\s+from\s+(.*?)\.\s+UPI:?\s*(\d{12})-ICICI\s+Bank/i
+    );
+    if (upiCreditMatch) {
+      const digits = upiCreditMatch[1];
+      const amountPaise = parseAmountToPaise(upiCreditMatch[2]);
+      const date = parseDateToken(upiCreditMatch[3]);
+      const merchantRaw = upiCreditMatch[4].trim();
+      const refNo = upiCreditMatch[5].trim();
+
+      if (amountPaise && date) {
+        const accountId = matchAccount('icici', digits, accounts);
+        const isHousehold = isHouseholdName(merchantRaw, ownerNames);
+        const kind = isHousehold ? 'transfer' : 'income';
+
+        return {
+          issuer: 'icici',
+          accountId,
+          accountHint: { issuer: 'icici', digits },
+          amountPaise,
+          direction: 'credit',
+          kind,
+          date,
+          time: null,
+          txnTs: null,
+          merchantRaw,
+          mode: 'upi',
+          refNo,
+          availLimitPaise: null,
+          dedupeKey: `ref:${refNo}`,
+          linkHint: null,
           source: 'sms',
         };
       }

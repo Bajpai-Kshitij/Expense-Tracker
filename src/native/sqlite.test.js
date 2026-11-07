@@ -154,11 +154,11 @@ describe('Capacitor SQLite Adapter with mocked native plugin', () => {
     const adapter = createSqliteAdapterFromDb(mockDb, 'test_migrations');
 
     const version = await migrate(adapter);
-    expect(version).toBe(1);
+    expect(version).toBe(2);
 
-    // Verify schema_version table exists and has row 1
-    const rows = await adapter.query('SELECT version FROM schema_version;');
-    expect(rows).toEqual([{ version: 1 }]);
+    // Verify schema_version table exists and has rows for migrations
+    const rows = await adapter.query('SELECT version FROM schema_version ORDER BY version ASC;');
+    expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
 
     // Verify expenses table was created
     const expensesRows = await adapter.query('SELECT * FROM expenses;');

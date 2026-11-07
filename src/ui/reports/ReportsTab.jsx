@@ -25,6 +25,7 @@ import {
   accountTotals,
   ownerTotals,
   addedByTotals,
+  uncountedTotals,
 } from '../../core/db/reportQueries.js';
 
 import { formatPaise } from '../../core/format/money.js';
@@ -64,6 +65,11 @@ export default function ReportsTab({
   const [accountList, setAccountList] = useState([]);
   const [deviceList, setDeviceList] = useState([]);
   const [insightsList, setInsightsList] = useState([]);
+  const [uncounted, setUncounted] = useState({
+    transfersOutPaise: 0,
+    transfersInPaise: 0,
+    incomePaise: 0,
+  });
 
   // Loading states
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -235,6 +241,13 @@ export default function ReportsTab({
       setOwnerList(owners);
       setAccountList(accs);
       setDeviceList(devs);
+      // 7. Uncounted Totals
+      try {
+        const uncountedData = await uncountedTotals(db, { from, to });
+        setUncounted(uncountedData);
+      } catch (err) {
+        console.error('Failed to load uncountedTotals in ReportsTab:', err);
+      }
     } catch (err) {
       console.error('Failed to load whoTotals in ReportsTab:', err);
     } finally {
@@ -331,6 +344,10 @@ export default function ReportsTab({
             />
             <span>Include fixed payments</span>
           </label>
+        </div>
+
+        <div style={{ marginTop: '10px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          Not counted: transfers out {formatPaise(uncounted.transfersOutPaise)}, transfers in {formatPaise(uncounted.transfersInPaise)}, income {formatPaise(uncounted.incomePaise)}
         </div>
       </section>
 

@@ -157,5 +157,50 @@ describe('viewModels pure logic', () => {
     expect(lines).toContain('1 refund linked');
     expect(lines).toContain('5 duplicate messages');
   });
+
+  it('BUG A reproduction: view-model functions with broken payloads (null, missing fields, deleted expense) never throw', () => {
+    // 1. describeDuplicate with null or broken payloads
+    expect(() => describeDuplicate(null, null)).not.toThrow();
+    expect(describeDuplicate(null, null)).toEqual({ stale: true });
+
+    expect(() => describeDuplicate({ payload: null }, null)).not.toThrow();
+    expect(describeDuplicate({ payload: null }, null)).toEqual({ stale: true });
+
+    expect(() => describeDuplicate({ payload: { importedId: 'exp1' } }, null)).not.toThrow();
+    expect(describeDuplicate({ payload: { importedId: 'exp1' } }, null)).toEqual({ stale: true });
+
+    // Statement / pipeline payload format with incomingExpenseId and candidateExpenseIds
+    const statementItem = {
+      id: 'rv_stmt_1',
+      payload: {
+        incomingExpenseId: 'e_stmt_1',
+        candidateExpenseIds: ['e_manual_1'],
+      },
+    };
+    const expensesWithStmt = {
+      e_stmt_1: { id: 'e_stmt_1', amountPaise: 25000, date: '2026-11-01', merchantRaw: 'Merchant' },
+      e_manual_1: { id: 'e_manual_1', amountPaise: 25000, date: '2026-11-01', merchantRaw: 'Merchant' },
+    };
+    const descStmt = describeDuplicate(statementItem, expensesWithStmt);
+    expect(descStmt.stale).toBe(false);
+    expect(descStmt.imported?.id).toBe('e_stmt_1');
+    expect(descStmt.manual?.[0]?.id).toBe('e_manual_1');
+
+    // 2. describeUnknownAccount with null, broken payload, or null accounts
+    expect(() => describeUnknownAccount(null, null, null)).not.toThrow();
+    const descNullAcc = describeUnknownAccount(null, null, null);
+    expect(descNullAcc.title).toBeDefined();
+    expect(descNullAcc.subtitle).toBeDefined();
+    expect(descNullAcc.suggestions).toEqual([]);
+
+    expect(() => describeUnknownAccount({ payload: null }, 0, { a: null })).not.toThrow();
+    expect(describeUnknownAccount({ payload: null }, 0, { a: null }).suggestions).toEqual([]);
+
+    // 3. describeUnparsed with null or broken payloads
+    expect(() => describeUnparsed(null)).not.toThrow();
+    expect(describeUnparsed(null)).toEqual({ preview: '', receivedAt: '', address: '' });
+    expect(() => describeUnparsed({ payload: null })).not.toThrow();
+    expect(describeUnparsed({ payload: null })).toEqual({ preview: '', receivedAt: '', address: '' });
+  });
 });
 

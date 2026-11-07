@@ -314,5 +314,62 @@ describe('PHASE P6 - Categorization and Pattern Matching', () => {
       expect(manualData.category_locked).toBe(1); // Locked!
     });
   });
+
+  describe('FEATURE E4 - Rules with kind and no category', () => {
+    it('allows categoryId null when kind is set; categorize returns { categoryId: null, kind }', () => {
+      const rules = [
+        {
+          id: 'r_transfer',
+          pattern: 'SELF TRANSFER',
+          mode: 'words',
+          categoryId: null,
+          kind: 'transfer',
+          active: true,
+        },
+      ];
+      const res = categorize(
+        { merchantRaw: 'SELF TRANSFER TO WIFE', amountPaise: 50000 },
+        { rules, categories: {} }
+      );
+      expect(res.categoryId).toBeNull();
+      expect(res.kind).toBe('transfer');
+      expect(res.matchedRuleId).toBe('r_transfer');
+    });
+
+    it('planReapply applies kind changes to uncategorized, unlocked expenses', () => {
+      const rules = [
+        {
+          id: 'r_transfer',
+          pattern: 'CREDIT CARD PAYMENT',
+          mode: 'words',
+          categoryId: null,
+          kind: 'transfer',
+          active: true,
+        },
+      ];
+      const expenses = [
+        {
+          id: 'exp_1',
+          merchant_raw: 'CREDIT CARD PAYMENT',
+          kind: 'spend',
+          category_id: null,
+          category_locked: 0,
+        },
+        {
+          id: 'exp_locked',
+          merchant_raw: 'CREDIT CARD PAYMENT',
+          kind: 'spend',
+          category_id: null,
+          category_locked: 1, // locked -> must not touch
+        },
+      ];
+
+      const plan = planReapply(expenses, { rules, categories: {} });
+      expect(plan.summary.updatedCount).toBe(1);
+      expect(plan.updates).toHaveLength(1);
+      expect(plan.updates[0].expenseId).toBe('exp_1');
+      expect(plan.updates[0].patch.kind).toBe('transfer');
+    });
+  });
 });
 

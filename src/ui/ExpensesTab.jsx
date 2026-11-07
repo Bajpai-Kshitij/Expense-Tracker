@@ -339,6 +339,11 @@ export default function ExpensesTab({
                           {exp.kind}
                         </span>
                       )}
+                      {(exp.kind === 'transfer' || exp.kind === 'income') && (
+                        <span className="badge badge-not-counted" style={{ background: 'var(--bg-tertiary, #e2e8f0)', color: 'var(--text-secondary, #64748b)', fontSize: '0.65rem', padding: '1px 5px', borderRadius: '4px' }}>
+                          Not counted
+                        </span>
+                      )}
                       {exp.source === 'sms' && (
                         <span className="badge badge-sms" style={{ background: '#0284c7', color: '#fff', fontSize: '0.65rem', padding: '1px 4px', borderRadius: '4px' }}>
                           SMS

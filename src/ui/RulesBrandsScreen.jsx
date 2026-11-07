@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { compilePattern } from '../core/categorize/pattern.js';
-import { categorize } from '../core/categorize/categorize.js';
+import {
+  categorize,
+  planRenumberRules,
+  getNewRulePriority,
+  swapRulePriorities,
+} from '../core/categorize/index.js';
+import CategoryIcon from './CategoryIcon.jsx';
 
 export default function RulesBrandsScreen({
   db,
@@ -91,6 +97,21 @@ export default function RulesBrandsScreen({
     loadUsage();
   }, [db]);
 
+  // When Rules subTab opens and two rules share a priority, renumber with gaps of 10
+  useEffect(() => {
+    if (subTab === 'rules' && writer && rules.length > 1) {
+      const changed = planRenumberRules(rules);
+      if (changed.length > 0) {
+        Promise.all(changed.map((r) => writer.write('rule.upserted', r)))
+          .then(() => {
+            if (onReloadLookups) onReloadLookups();
+            showToast('Renumbered rules with gaps of 10');
+          })
+          .catch((err) => console.error('Failed to auto-renumber duplicate rule priorities:', err));
+      }
+    }
+  }, [subTab, rules, writer]);
+
   // Sort rules by priority ASC, id ASC
   const sortedRules = [...rules].sort((a, b) => {
     const pA = a.priority ?? 100;
@@ -99,12 +120,9 @@ export default function RulesBrandsScreen({
     return (a.id || '').localeCompare(b.id || '');
   });
 
-  // Sort brands by priority ASC, id ASC
+  // Sort brands alphabetically
   const sortedBrands = [...brands].sort((a, b) => {
-    const pA = a.priority ?? 100;
-    const pB = b.priority ?? 100;
-    if (pA !== pB) return pA - pB;
-    return (a.id || '').localeCompare(b.id || '');
+    return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
   });
 
   // Live tester simulation
@@ -158,24 +176,17 @@ export default function RulesBrandsScreen({
     if (targetIndex < 0 || targetIndex >= sortedRules.length) return;
 
     try {
-      const copy = [...sortedRules];
-      const temp = copy[index];
-      copy[index] = copy[targetIndex];
-      copy[targetIndex] = temp;
+      const ruleA = sortedRules[index];
+      const ruleB = sortedRules[targetIndex];
+      const [swappedA, swappedB] = swapRulePriorities(ruleA, ruleB);
 
-      // Renumber with gaps of 10
-      for (let i = 0; i < copy.length; i++) {
-        const expectedPriority = (i + 1) * 10;
-        if (copy[i].priority !== expectedPriority) {
-          const updated = { ...copy[i], priority: expectedPriority };
-          await writer.write('rule.upserted', updated);
-        }
-      }
+      await writer.write('rule.upserted', swappedA);
+      await writer.write('rule.upserted', swappedB);
 
       if (onReloadLookups) await onReloadLookups();
-      showToast('Rule priorities renumbered with gaps of 10');
+      showToast('Swapped rule priorities');
     } catch (e) {
-      console.error('Failed to reorder rules:', e);
+      console.error('Failed to swap rule priorities:', e);
     }
   };
 
@@ -211,9 +222,7 @@ export default function RulesBrandsScreen({
         active: rule.active !== false,
       });
     } else {
-      const nextPriority = sortedRules.length > 0
-        ? Math.max(...sortedRules.map((r) => r.priority ?? 10)) + 10
-        : 10;
+      const nextPriority = getNewRulePriority(rules);
       setRuleModal({
         open: true,
         rule: null,
@@ -248,7 +257,7 @@ export default function RulesBrandsScreen({
         field: ruleModal.field,
         pattern: ruleModal.pattern.trim(),
         mode: ruleModal.mode,
-        categoryId: ruleModal.categoryId,
+        categoryId: ruleModal.categoryId || null,
         kind: ruleModal.kind || null,
         accountId: ruleModal.accountId || null,
         direction: ruleModal.direction || null,
@@ -515,7 +524,7 @@ export default function RulesBrandsScreen({
                 <div key={rule.id} className="card" style={{ padding: '12px 14px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className="priority-badge">#{rule.priority ?? 100}</span>
+                      <span className="priority-badge">{idx + 1}</span>
                       <strong style={{ fontSize: '0.95rem' }}>{rule.pattern}</strong>
                       <span className="mode-badge">{rule.mode || 'words'}</span>
                     </div>
@@ -620,7 +629,6 @@ export default function RulesBrandsScreen({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="priority-badge">#{brand.priority ?? 10}</span>
                         <strong style={{ fontSize: '0.95rem' }}>{brand.name}</strong>
                         <span className="mode-badge">{brand.mode || 'words'}</span>
                       </div>
@@ -693,22 +701,8 @@ export default function RulesBrandsScreen({
               return (
                 <div key={cat.id} className="card" style={{ padding: '12px 14px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span
-                        style={{
-                          width: '28px',
-                          height: '28px',
-                          borderRadius: '6px',
-                          backgroundColor: cat.color || '#3b82f6',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#ffffff',
-                          fontSize: '0.9rem',
-                        }}
-                      >
-                        {cat.icon || '🏷️'}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <CategoryIcon category={cat} size={40} />
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <strong style={{ fontSize: '0.95rem' }}>{cat.name}</strong>
@@ -822,6 +816,7 @@ export default function RulesBrandsScreen({
                     value={ruleModal.categoryId}
                     onChange={(e) => setRuleModal({ ...ruleModal, categoryId: e.target.value })}
                   >
+                    <option value="">(No Category)</option>
                     {activeCategories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -830,18 +825,17 @@ export default function RulesBrandsScreen({
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Kind (Optional)</label>
+                  <label className="form-label">Count as</label>
                   <select
                     className="form-select"
                     value={ruleModal.kind}
                     onChange={(e) => setRuleModal({ ...ruleModal, kind: e.target.value })}
                   >
                     <option value="">(Keep incoming)</option>
-                    <option value="spend">spend</option>
-                    <option value="income">income</option>
-                    <option value="transfer">transfer</option>
-                    <option value="fixed">fixed</option>
-                    <option value="invest">invest</option>
+                    <option value="spend">Spend</option>
+                    <option value="fixed">Fixed</option>
+                    <option value="transfer">Transfer</option>
+                    <option value="income">Income</option>
                   </select>
                 </div>
               </div>
@@ -947,7 +941,7 @@ export default function RulesBrandsScreen({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!rulePatternValidation.ok || !ruleModal.categoryId}
+                disabled={!rulePatternValidation.ok || (!ruleModal.categoryId && !ruleModal.kind)}
                 onClick={handleSaveRule}
               >
                 Save Rule

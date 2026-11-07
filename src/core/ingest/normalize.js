@@ -179,3 +179,55 @@ export function prepareBody(body) {
   return { lines, flat };
 }
 
+/**
+ * Checks if a merchant/payee name matches any household owner names.
+ * Matching rules:
+ * - case-insensitive
+ * - spaces collapsed
+ * - punctuation ignored
+ * - match when equal, OR when one is a prefix of the other and the shorter has at least 8 characters.
+ * 
+ * @param {string} text 
+ * @param {Array<string>|string} names 
+ * @returns {boolean}
+ */
+export function isHouseholdName(text, names) {
+  if (typeof text !== 'string' || !text.trim()) return false;
+  if (!names) return false;
+
+  const nameList = Array.isArray(names) ? names : [names];
+  if (nameList.length === 0) return false;
+
+  const clean = (s) => {
+    if (typeof s !== 'string') return '';
+    return s
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
+  const cleanText = clean(text);
+  if (!cleanText) return false;
+
+  for (const raw of nameList) {
+    const cleanCandidate = clean(raw);
+    if (!cleanCandidate) continue;
+
+    if (cleanText === cleanCandidate) {
+      return true;
+    }
+
+    if (cleanText.startsWith(cleanCandidate) && cleanCandidate.length >= 8) {
+      return true;
+    }
+
+    if (cleanCandidate.startsWith(cleanText) && cleanText.length >= 8) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+

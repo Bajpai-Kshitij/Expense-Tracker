@@ -131,6 +131,31 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'statement_support_and_expense_keys',
+    up: async (db) => {
+      const tableInfo = await db.query('PRAGMA table_info(expenses);');
+      const colNames = (tableInfo || []).map((col) => col.name);
+      if (!colNames.includes('statement_key')) {
+        await db.exec('ALTER TABLE expenses ADD COLUMN statement_key TEXT;');
+      }
+      if (!colNames.includes('statement_file_hash')) {
+        await db.exec('ALTER TABLE expenses ADD COLUMN statement_file_hash TEXT;');
+      }
+      if (!colNames.includes('link_id')) {
+        await db.exec('ALTER TABLE expenses ADD COLUMN link_id TEXT;');
+      }
+
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS expense_keys (
+          key TEXT PRIMARY KEY,
+          expense_id TEXT NOT NULL
+        );
+      `);
+      await db.exec('CREATE INDEX IF NOT EXISTS idx_expense_keys_expense_id ON expense_keys(expense_id);');
+    },
+  },
 ];
 
 /**

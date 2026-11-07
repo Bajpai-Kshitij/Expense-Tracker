@@ -11,6 +11,7 @@ import {
   accountTotals,
   ownerTotals,
   addedByTotals,
+  uncountedTotals,
 } from './reportQueries.js';
 import { createEvent } from '../events/event.js';
 
@@ -202,11 +203,47 @@ describe('reportQueries - SQLite aggregation queries', () => {
           merchant_raw: 'SALARY CREDIT',
         },
       }),
-      // Deleted expense: 500.00 debit (status = 'deleted')
+      // Transfers out: 400.00 debit (kind = 'transfer')
       createEvent({
         type: 'expense.created',
         dev: 'dev-1',
         seq: 13,
+        ts: now,
+        data: {
+          expenseId: 'exp-transfer-out',
+          date: '2026-10-04',
+          amount_paise: 40000,
+          direction: 'debit',
+          kind: 'transfer',
+          category_id: null,
+          account_id: 'acc-sbi',
+          brand: null,
+          merchant_raw: 'TRANSFER TO WIFE',
+        },
+      }),
+      // Transfers in: 250.00 credit (kind = 'transfer')
+      createEvent({
+        type: 'expense.created',
+        dev: 'dev-2',
+        seq: 14,
+        ts: now,
+        data: {
+          expenseId: 'exp-transfer-in',
+          date: '2026-10-08',
+          amount_paise: 25000,
+          direction: 'credit',
+          kind: 'transfer',
+          category_id: null,
+          account_id: 'acc-sbi',
+          brand: null,
+          merchant_raw: 'TRANSFER FROM WIFE',
+        },
+      }),
+      // Deleted expense: 500.00 debit (status = 'deleted')
+      createEvent({
+        type: 'expense.created',
+        dev: 'dev-1',
+        seq: 15,
         ts: now,
         data: {
           expenseId: 'exp-7',
@@ -223,7 +260,7 @@ describe('reportQueries - SQLite aggregation queries', () => {
       createEvent({
         type: 'expense.deleted',
         dev: 'dev-1',
-        seq: 14,
+        seq: 16,
         ts: now,
         data: { expenseId: 'exp-7' },
       }),
@@ -231,7 +268,7 @@ describe('reportQueries - SQLite aggregation queries', () => {
       createEvent({
         type: 'expense.created',
         dev: 'dev-1',
-        seq: 15,
+        seq: 17,
         ts: now,
         data: {
           expenseId: 'exp-8',
@@ -374,5 +411,44 @@ describe('reportQueries - SQLite aggregation queries', () => {
     expect(sumCats2).toBe(sumDays2);
     expect(sumDays2).toBe(monthNet2);
     expect(monthNet2).toBe(tot2.netPaise);
+  });
+
+  it('aggregates uncounted totals for transfers and income', async () => {
+    const res = await uncountedTotals(db, { from: '2026-10-01', to: '2026-10-31' });
+    expect(res).toEqual({
+      transfersOutPaise: 40000,
+      transfersInPaise: 25000,
+      incomePaise: 100000,
+    });
+  });
+
+  it('FEATURE E3: transfers and income are never counted in Home, Expenses, or Reports totals', async () => {
+    const filters = { from: '2026-10-01', to: '2026-10-31', includeFixed: false };
+
+    // Home screen total
+    const homeTotal = await totals(db, filters);
+
+    // Expenses screen total
+    const expensesTotal = await totals(db, filters);
+
+    // Reports screen month total
+    const reportMonths = await monthTotals(db, { fromMonth: '2026-10', toMonth: '2026-10', includeFixed: false });
+    const reportsTotalPaise = reportMonths[0] ? reportMonths[0].netPaise : 0;
+
+    // Reports screen category breakdown total
+    const catRows = await categoryTotals(db, filters);
+    const catTotalPaise = catRows.reduce((sum, c) => sum + c.netPaise, 0);
+
+    // All totals must be strictly equal to 20000 paise
+    expect(homeTotal.netPaise).toBe(20000);
+    expect(expensesTotal.netPaise).toBe(20000);
+    expect(reportsTotalPaise).toBe(20000);
+    expect(catTotalPaise).toBe(20000);
+
+    // Verify transfers and income are strictly uncounted (not in the 20000 paise total)
+    const uncounted = await uncountedTotals(db, filters);
+    expect(uncounted.transfersOutPaise).toBe(40000);
+    expect(uncounted.transfersInPaise).toBe(25000);
+    expect(uncounted.incomePaise).toBe(100000);
   });
 });

@@ -15,6 +15,7 @@ export default function SettingsTab({
   onUpdateDeviceLabel,
   onNavigateToRulesBrands,
   onNavigateToSmsImport,
+  onNavigateToStatementImport,
   onNavigateToAccounts,
   onNavigateToReview,
   openReviewCount = 0,
@@ -134,6 +135,23 @@ export default function SettingsTab({
           </h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             Configure senders, scan inbox, and auto-import bank SMS
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
+      </div>
+
+      {/* Statement Import */}
+      <div
+        className="card"
+        onClick={onNavigateToStatementImport}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            📄 Import statement
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Import credit card statements with automatic reconciliation and deduplication
           </p>
         </div>
         <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>

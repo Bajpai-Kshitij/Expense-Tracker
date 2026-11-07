@@ -3,7 +3,22 @@ import { sha256Hex } from './registry.js';
 import { expenseIdFromDedupeKey } from '../events/id.js';
 import { categorize } from '../categorize/index.js';
 import { isAllowed } from './senders.js';
-import { findRefundOriginal, findManualCandidates } from './match.js';
+import { findRefundOriginal, findManualCandidates, findStatementMatch } from './match.js';
+
+/**
+ * Computes deterministic linkId for card payments across SMS and statement pipelines.
+ * Formula: "pay_" + first 12 hex of SHA-256(cardLast4 + "|" + amountPaise + "|" + date)
+ *
+ * @param {object} params
+ * @param {string} params.cardLast4
+ * @param {number} params.amountPaise
+ * @param {string} params.date "YYYY-MM-DD"
+ * @returns {string|null}
+ */
+export function computePaymentLinkId({ cardLast4, amountPaise, date }) {
+  if (!cardLast4) return null;
+  return 'pay_' + sha256Hex(`${cardLast4}|${amountPaise}|${date}`).slice(0, 12);
+}
 
 /**
  * Plans importing an array of incoming SMS messages against the current system state.
@@ -205,6 +220,75 @@ export function planImport({
         continue;
       }
 
+      // Check if SMS dedupeKey exists in linkedKeys / expense_keys
+      const linkedExpense = Object.values(allExpenses).find((exp) => {
+        if (exp.dedupeKey === txn.dedupeKey) return true;
+        if (exp.linkedKeys && exp.linkedKeys.has(txn.dedupeKey)) return true;
+        return false;
+      });
+      if (linkedExpense) {
+        summary.duplicateTransaction += 1;
+        continue;
+      }
+
+      // Check mirrored statement match
+      const stmtMatch = findStatementMatch(txn, txn.accountId, allExpenses);
+      if (stmtMatch.status === 'one') {
+        const matchedExpenseId = stmtMatch.expenseId;
+        const targetExp = allExpenses[matchedExpenseId];
+
+        events.push({
+          type: 'expense.linked',
+          data: {
+            expenseId: matchedExpenseId,
+            key: txn.dedupeKey,
+            via: 'sms',
+          },
+        });
+
+        // Patch only empty fields; never overwrite statement values
+        const patch = {};
+        if (!targetExp.txnTs && txn.txnTs) patch.txnTs = txn.txnTs;
+        if (!targetExp.refNo && txn.refNo) patch.refNo = txn.refNo;
+        if (!targetExp.mode && txn.mode) patch.mode = txn.mode;
+        if (!targetExp.availLimitPaise && txn.availLimitPaise) patch.availLimitPaise = txn.availLimitPaise;
+        patch.smsKey = txn.dedupeKey;
+
+        events.push({
+          type: 'expense.updated',
+          data: {
+            expenseId: matchedExpenseId,
+            patch,
+          },
+        });
+
+        if (!targetExp.linkedKeys) targetExp.linkedKeys = new Set();
+        targetExp.linkedKeys.add(txn.dedupeKey);
+        targetExp.smsKey = txn.dedupeKey;
+        Object.assign(targetExp, patch);
+        continue;
+      } else if (stmtMatch.status === 'many') {
+        summary.possibleDuplicates += 1;
+        const reviewId = 'rv_' + sha256Hex('possible_duplicate|' + expenseId).slice(0, 12);
+        if (!state?.reviews?.[reviewId]) {
+          reviewItems.push({
+            id: reviewId,
+            reviewId,
+            type: 'possible_duplicate',
+            payload: {
+              id: reviewId,
+              reviewId,
+              type: 'possible_duplicate',
+              status: 'open',
+              incomingExpenseId: expenseId,
+              candidateExpenseIds: stmtMatch.candidates.map((c) => c.id),
+              reason: 'multiple_statement_candidates',
+            },
+            status: 'open',
+          });
+        }
+      }
+
       let finalKind = txn.kind;
       let brand = null;
       let categoryId = null;
@@ -247,7 +331,11 @@ export function planImport({
       // Card payment link
       let linkId = null;
       if (txn.linkHint?.type === 'card_payment' && txn.linkHint.cardLast4) {
-        linkId = 'pay_' + sha256Hex(`${txn.linkHint.cardLast4}|${txn.amountPaise}|${txn.date}`).slice(0, 12);
+        linkId = computePaymentLinkId({
+          cardLast4: txn.linkHint.cardLast4,
+          amountPaise: txn.amountPaise,
+          date: txn.date,
+        });
       }
 
       // Manual duplicate check

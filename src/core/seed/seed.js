@@ -4,18 +4,18 @@
  */
 
 export const SEED_CATEGORIES = [
-  { id: 'cat_food', name: 'Food', icon: 'utensils', color: '#f97316' },
-  { id: 'cat_groceries', name: 'Groceries', icon: 'shopping-cart', color: '#22c55e' },
-  { id: 'cat_fuel', name: 'Fuel', icon: 'fuel', color: '#eab308' },
-  { id: 'cat_travel', name: 'Travel', icon: 'plane', color: '#3b82f6' },
-  { id: 'cat_shopping', name: 'Shopping', icon: 'bag-handle', color: '#ec4899' },
-  { id: 'cat_bills', name: 'Bills and Utilities', icon: 'receipt', color: '#8b5cf6' },
-  { id: 'cat_entertainment', name: 'Entertainment', icon: 'film', color: '#a855f7' },
-  { id: 'cat_health', name: 'Health', icon: 'heart', color: '#ef4444' },
-  { id: 'cat_emi', name: 'EMI and Loans', icon: 'cash', color: '#64748b' },
-  { id: 'cat_cash', name: 'Cash', icon: 'banknote', color: '#10b981' },
-  { id: 'cat_insurance', name: 'Insurance', icon: 'shield', color: '#06b6d4' },
-  { id: 'cat_other', name: 'Other', icon: 'grid', color: '#94a3b8' },
+  { id: 'cat_food', name: 'Food', icon: '🍽', color: '#f97316' },
+  { id: 'cat_groceries', name: 'Groceries', icon: '🛒', color: '#22c55e' },
+  { id: 'cat_fuel', name: 'Fuel', icon: '⛽', color: '#eab308' },
+  { id: 'cat_travel', name: 'Travel', icon: '✈️', color: '#3b82f6' },
+  { id: 'cat_shopping', name: 'Shopping', icon: '🛍', color: '#ec4899' },
+  { id: 'cat_bills', name: 'Bills and Utilities', icon: '🧾', color: '#8b5cf6' },
+  { id: 'cat_entertainment', name: 'Entertainment', icon: '🎬', color: '#a855f7' },
+  { id: 'cat_health', name: 'Health', icon: '💊', color: '#ef4444' },
+  { id: 'cat_emi', name: 'EMI and Loans', icon: '💳', color: '#64748b' },
+  { id: 'cat_cash', name: 'Cash', icon: '💵', color: '#10b981' },
+  { id: 'cat_insurance', name: 'Insurance', icon: '🛡', color: '#06b6d4' },
+  { id: 'cat_other', name: 'Other', icon: '📦', color: '#94a3b8' },
 ];
 
 export const SEED_ACCOUNTS = [
@@ -29,7 +29,7 @@ export const SEED_ACCOUNTS = [
   { id: 'acc_idfc_millennia', name: 'IDFC First Millennia 1885', owner: 'Me', issuer: 'IDFC', lastDigits: '1885', type: 'card' },
   { id: 'acc_axis_savings', name: 'Axis Savings 7693', owner: 'Me', issuer: 'Axis', lastDigits: '7693', type: 'bank' },
   { id: 'acc_icici_savings', name: 'ICICI Savings 476', owner: 'Me', issuer: 'ICICI', lastDigits: '476', type: 'bank' },
-  { id: 'acc_joint', name: 'Joint Account 4425', owner: 'Joint', issuer: 'unknown', lastDigits: '4425', type: 'bank' },
+  { id: 'acc_joint', name: 'Joint Account 4425', owner: 'Joint', issuer: 'icici', lastDigits: '4425', type: 'bank' },
   { id: 'acc_cash', name: 'Cash', owner: 'Me', issuer: null, lastDigits: null, type: 'cash' },
 ];
 

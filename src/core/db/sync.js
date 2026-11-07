@@ -15,14 +15,16 @@ async function writeProjectionRows(tx, rows) {
   await tx.exec('DELETE FROM review_queue;');
   await tx.exec('DELETE FROM applied_events;');
   await tx.exec('DELETE FROM pending_events;');
+  await tx.exec('DELETE FROM expense_keys;');
 
   for (const exp of rows.expenses) {
     await tx.exec(
       `INSERT INTO expenses (
         id, amount_paise, date, txn_ts, direction, kind, merchant_raw, brand,
         category_id, category_locked, account_id, mode, source, ref_no, dedupe_key,
-        note, status, field_ts, created_by_dev, merged_into
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        note, status, field_ts, created_by_dev, merged_into,
+        statement_key, statement_file_hash, link_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         exp.id,
         exp.amount_paise,
@@ -44,6 +46,9 @@ async function writeProjectionRows(tx, rows) {
         exp.field_ts,
         exp.created_by_dev,
         exp.merged_into,
+        exp.statement_key,
+        exp.statement_file_hash,
+        exp.link_id,
       ]
     );
   }
@@ -93,6 +98,13 @@ async function writeProjectionRows(tx, rows) {
       pending.event,
     ]);
   }
+
+  for (const k of rows.expense_keys || []) {
+    await tx.exec('INSERT INTO expense_keys (key, expense_id) VALUES (?, ?);', [
+      k.key,
+      k.expense_id,
+    ]);
+  }
 }
 
 /**
@@ -132,6 +144,7 @@ export async function applyEventsToDb(db, newEvents = []) {
     applied_events: await db.query('SELECT * FROM applied_events ORDER BY id ASC;'),
     pending_events: await db.query('SELECT * FROM pending_events ORDER BY id ASC;'),
     review_queue: await db.query('SELECT * FROM review_queue ORDER BY id ASC;'),
+    expense_keys: await db.query('SELECT * FROM expense_keys ORDER BY key ASC;'),
   };
 
   const currentState = rowsToState(rows);
@@ -160,11 +173,13 @@ export async function dumpDatabase(db) {
     'review_queue',
     'applied_events',
     'pending_events',
+    'expense_keys',
   ];
 
   const dump = {};
   for (const table of tables) {
-    dump[table] = await db.query(`SELECT * FROM ${table} ORDER BY id ASC;`);
+    const orderCol = table === 'expense_keys' ? 'key' : 'id';
+    dump[table] = await db.query(`SELECT * FROM ${table} ORDER BY ${orderCol} ASC;`);
   }
   return dump;
 }

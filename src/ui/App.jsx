@@ -21,6 +21,7 @@ import RulesBrandsScreen from './RulesBrandsScreen.jsx';
 import SmsImportScreen from './SmsImportScreen.jsx';
 import ReviewScreen from './ReviewScreen.jsx';
 import AccountsScreen from './AccountsScreen.jsx';
+import StatementImport from './StatementImport.jsx';
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { scanSms } from '../native/smsScan.js';
 import { readSms } from '../native/expenseNative.js';
@@ -522,6 +523,7 @@ export default function App() {
             onUpdateDeviceLabel={handleUpdateDeviceLabel}
             onNavigateToRulesBrands={() => setActiveTab('rules_brands')}
             onNavigateToSmsImport={() => setActiveTab('sms_import')}
+            onNavigateToStatementImport={() => setActiveTab('statement_import')}
             onNavigateToAccounts={() => setActiveTab('accounts')}
             onNavigateToReview={() => setActiveTab('review')}
           />
@@ -572,6 +574,17 @@ export default function App() {
               await loadLookups(db, runtime);
               setRefreshTick((prev) => prev + 1);
             }}
+          />
+        )}
+
+        {activeTab === 'statement_import' && (
+          <StatementImport
+            db={db}
+            writer={runtime?.writer}
+            accounts={accounts}
+            onBack={() => setActiveTab('settings')}
+            onNavigateToReview={() => setActiveTab('review')}
+            showToast={showToast}
           />
         )}
 

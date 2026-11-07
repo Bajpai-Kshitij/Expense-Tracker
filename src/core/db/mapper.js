@@ -34,6 +34,19 @@ export function stateToRows(state) {
       field_ts: JSON.stringify(exp.field_ts || {}),
       created_by_dev: exp.created_by_dev !== undefined ? exp.created_by_dev : (exp.createdDev || null),
       merged_into: exp.merged_into !== undefined ? exp.merged_into : (exp.mergedInto || null),
+      statement_key:
+        exp.statement_key !== undefined
+          ? exp.statement_key
+          : exp.statementKey !== undefined
+          ? exp.statementKey
+          : null,
+      statement_file_hash:
+        exp.statement_file_hash !== undefined
+          ? exp.statement_file_hash
+          : exp.statementFileHash !== undefined
+          ? exp.statementFileHash
+          : null,
+      link_id: exp.link_id !== undefined ? exp.link_id : (exp.linkId || null),
     }));
 
   const categories = Object.values(state.categories || {})
@@ -112,6 +125,23 @@ export function stateToRows(state) {
       status: rev.status || 'pending',
     }));
 
+  const expenseKeysMap = new Map();
+  for (const exp of Object.values(state.expenses || {})) {
+    const keys = new Set(exp.linkedKeys || []);
+    if (exp.dedupeKey) keys.add(exp.dedupeKey);
+    if (exp.dedupe_key) keys.add(exp.dedupe_key);
+    if (exp.statementKey) keys.add(exp.statementKey);
+    if (exp.statement_key) keys.add(exp.statement_key);
+    for (const k of keys) {
+      if (typeof k === 'string' && k.length > 0) {
+        expenseKeysMap.set(k, exp.id);
+      }
+    }
+  }
+  const expense_keys = Array.from(expenseKeysMap.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([key, expense_id]) => ({ key, expense_id }));
+
   return {
     expenses,
     categories,
@@ -121,6 +151,7 @@ export function stateToRows(state) {
     applied_events,
     pending_events,
     review_queue,
+    expense_keys,
   };
 }
 
@@ -164,8 +195,26 @@ export function rowsToState(rows = {}) {
     if (row.txn_ts) exp.createdAt = row.txn_ts;
     if (row.created_by_dev) exp.createdDev = row.created_by_dev;
     if (row.merged_into) exp.mergedInto = row.merged_into;
+    if (row.statement_key !== null && row.statement_key !== undefined) {
+      exp.statementKey = row.statement_key;
+    }
+    if (row.statement_file_hash !== null && row.statement_file_hash !== undefined) {
+      exp.statementFileHash = row.statement_file_hash;
+    }
+    if (row.link_id !== null && row.link_id !== undefined) {
+      exp.linkId = row.link_id;
+    }
+    exp.linkedKeys = new Set();
+    if (exp.dedupeKey) exp.linkedKeys.add(exp.dedupeKey);
+    if (exp.statementKey) exp.linkedKeys.add(exp.statementKey);
 
     state.expenses[row.id] = exp;
+  }
+
+  for (const row of rows.expense_keys || []) {
+    if (state.expenses[row.expense_id]) {
+      state.expenses[row.expense_id].linkedKeys.add(row.key);
+    }
   }
 
   for (const row of rows.categories || []) {

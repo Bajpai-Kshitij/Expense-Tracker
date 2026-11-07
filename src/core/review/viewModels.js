@@ -81,7 +81,9 @@ export function groupReviewItems(items = []) {
  * }}
  */
 export function describeUnknownAccount(item, heldCount = 1, accounts = []) {
-  const payload = item?.payload || item || {};
+  const payload = (item && typeof item === 'object' && item.payload && typeof item.payload === 'object')
+    ? item.payload
+    : (item && typeof item === 'object' ? item : {});
   const rawIssuer = payload.issuer || '';
   const digits = payload.digits || '';
   const product = payload.product || '';
@@ -106,17 +108,17 @@ export function describeUnknownAccount(item, heldCount = 1, accounts = []) {
     title = `${issuer || 'Unknown'} account`.trim();
   }
 
-  const count = typeof heldCount === 'number' ? heldCount : 1;
+  const count = typeof heldCount === 'number' && !isNaN(heldCount) ? heldCount : 1;
   const subtitle = `${count} ${count === 1 ? 'message' : 'messages'} waiting`;
 
   const accList = Array.isArray(accounts)
     ? accounts
-    : accounts && typeof accounts === 'object'
+    : (accounts && typeof accounts === 'object')
     ? Object.values(accounts)
     : [];
 
   // Exclude archived accounts
-  const activeAccounts = accList.filter((acc) => !acc.archived && acc.archived !== 1 && acc.archived !== true);
+  const activeAccounts = accList.filter((acc) => acc && typeof acc === 'object' && !acc.archived && acc.archived !== 1 && acc.archived !== true);
 
   // Suggestions: accounts of the same issuer first
   const targetIssuer = String(issuer).trim().toLowerCase();
@@ -124,7 +126,7 @@ export function describeUnknownAccount(item, heldCount = 1, accounts = []) {
   const otherAccounts = [];
 
   for (const acc of activeAccounts) {
-    const accIssuer = String(acc.issuer || '').trim().toLowerCase();
+    const accIssuer = String(acc?.issuer || '').trim().toLowerCase();
     if (targetIssuer && accIssuer === targetIssuer) {
       sameIssuer.push(acc);
     } else {
@@ -152,27 +154,33 @@ export function describeUnknownAccount(item, heldCount = 1, accounts = []) {
  * }}
  */
 export function describeDuplicate(item, expenses = []) {
-  const payload = item?.payload || item || {};
-  const importedId = payload.importedId;
-  const candidateIds = Array.isArray(payload.candidateIds) ? payload.candidateIds : [];
+  const payload = (item && typeof item === 'object' && item.payload && typeof item.payload === 'object')
+    ? item.payload
+    : (item && typeof item === 'object' ? item : {});
+  const importedId = payload.importedId || payload.incomingExpenseId;
+  const candidateIds = Array.isArray(payload.candidateIds)
+    ? payload.candidateIds
+    : Array.isArray(payload.candidateExpenseIds)
+    ? payload.candidateExpenseIds
+    : [];
 
   const expensesMap = Array.isArray(expenses)
     ? expenses.reduce((map, exp) => {
         if (exp?.id) map[exp.id] = exp;
         return map;
       }, {})
-    : expenses && typeof expenses === 'object'
+    : (expenses && typeof expenses === 'object')
     ? expenses
     : {};
 
-  const imported = importedId ? expensesMap[importedId] : null;
+  const imported = (importedId && expensesMap) ? expensesMap[importedId] : null;
   if (!imported || imported.deleted || imported.status === 'deleted') {
     return { stale: true };
   }
 
   const manualCandidates = candidateIds
-    .map((id) => expensesMap[id])
-    .filter((exp) => exp && !exp.deleted && exp.status !== 'deleted');
+    .map((id) => (expensesMap ? expensesMap[id] : null))
+    .filter((exp) => exp && typeof exp === 'object' && !exp.deleted && exp.status !== 'deleted');
 
   if (manualCandidates.length === 0) {
     return { stale: true };
@@ -197,8 +205,8 @@ export function describeDuplicate(item, expenses = []) {
   }
 
   // Merchant difference
-  const impMerchant = (imported.merchant_raw || imported.merchantRaw || imported.brand || '').trim();
-  const manMerchant = (primaryManual.merchant_raw || primaryManual.merchantRaw || primaryManual.brand || '').trim();
+  const impMerchant = String(imported.merchant_raw || imported.merchantRaw || imported.brand || '').trim();
+  const manMerchant = String(primaryManual.merchant_raw || primaryManual.merchantRaw || primaryManual.brand || '').trim();
   if (impMerchant !== manMerchant) {
     differences.push('merchant');
   }
@@ -211,8 +219,8 @@ export function describeDuplicate(item, expenses = []) {
   }
 
   // Note difference
-  const impNote = (imported.note || '').trim();
-  const manNote = (primaryManual.note || '').trim();
+  const impNote = String(imported.note || '').trim();
+  const manNote = String(primaryManual.note || '').trim();
   if (impNote !== manNote) {
     differences.push('note');
   }
@@ -236,8 +244,10 @@ export function describeDuplicate(item, expenses = []) {
  * }}
  */
 export function describeUnparsed(item) {
-  const payload = item?.payload || item || {};
-  const body = payload.body || '';
+  const payload = (item && typeof item === 'object' && item.payload && typeof item.payload === 'object')
+    ? item.payload
+    : (item && typeof item === 'object' ? item : {});
+  const body = typeof payload.body === 'string' ? payload.body : String(payload.body || '');
   const masked = maskForSharing(body).replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
   const preview = masked.slice(0, 60);
 

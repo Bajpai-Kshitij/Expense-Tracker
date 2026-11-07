@@ -377,10 +377,10 @@ export default function SmsImportScreen({
         </button>
       </div>
 
-      {/* Owner Names Section */}
+      {/* Household Names Section */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div className="card-header">
-          <span className="card-title">Owner Names</span>
+          <span className="card-title">Household names (you and your wife, exactly as the bank prints them)</span>
         </div>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
           Used to recognise transfers to yourself.

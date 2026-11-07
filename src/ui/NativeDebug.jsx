@@ -19,9 +19,11 @@ import { listSenders } from '../core/ingest/senders.js';
 import { scanSms } from '../native/smsScan.js';
 import { assignAccountAlias, listReviewItems, countOpenReviewItems } from '../core/ingest/review.js';
 import StatementProbe from './StatementProbe.jsx';
+import StatementImport from './StatementImport.jsx';
 
 export default function NativeDebug() {
   const [showStatementProbe, setShowStatementProbe] = useState(false);
+  const [showSampleStatement, setShowSampleStatement] = useState(false);
   const [folderUri, setFolderUri] = useState(
     () => localStorage.getItem('debug_folder_uri') || ''
   );
@@ -618,6 +620,17 @@ export default function NativeDebug() {
     return <StatementProbe onBack={() => setShowStatementProbe(false)} initialOwnerNames={ownerNamesInput} />;
   }
 
+  if (showSampleStatement) {
+    return (
+      <StatementImport
+        db={runtimeRef.current?.db}
+        writer={runtimeRef.current?.writer}
+        onBack={() => setShowSampleStatement(false)}
+        autoLoadSample={true}
+      />
+    );
+  }
+
   return (
     <div className="card" style={{ marginTop: '16px' }}>
       <h2>Native & Sync Debug (P3/P4)</h2>
@@ -625,24 +638,18 @@ export default function NativeDebug() {
         Current Folder URI: {folderUri ? folderUri.slice(0, 40) + '...' : '(none)'}
       </p>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="Owner names (comma separated)"
+          className="form-input"
+          placeholder="Household names (you and your wife, exactly as the bank prints them)"
           value={ownerNamesInput}
           onChange={(e) => setOwnerNamesInput(e.target.value)}
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #334155)',
-            background: 'var(--bg-input, #0f172a)',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '0.875rem',
-          }}
+          style={{ flex: '1 1 200px' }}
         />
         <button
           type="button"
+          className="btn btn-primary"
           onClick={handleSaveOwnerNames}
           disabled={isSavingOwnerNames}
           style={{ whiteSpace: 'nowrap' }}
@@ -652,24 +659,18 @@ export default function NativeDebug() {
       </div>
 
       {/* P7e-1 Senders Allowlist */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
         <input
           type="text"
+          className="form-input"
           placeholder="SMS senders (comma separated)"
           value={smsSendersInput}
           onChange={(e) => setSmsSendersInput(e.target.value)}
-          style={{
-            flex: 1,
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #334155)',
-            background: 'var(--bg-input, #0f172a)',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '0.875rem',
-          }}
+          style={{ flex: '1 1 200px' }}
         />
         <button
           type="button"
+          className="btn btn-primary"
           onClick={handleSaveSmsSenders}
           disabled={isSavingSenders}
           style={{ whiteSpace: 'nowrap' }}
@@ -679,100 +680,83 @@ export default function NativeDebug() {
       </div>
 
       {/* P7e-1 Assign Alias Inputs */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
         <input
           type="text"
+          className="form-input"
           placeholder="Issuer (e.g. icici)"
           value={aliasIssuer}
           onChange={(e) => setAliasIssuer(e.target.value)}
-          style={{
-            flex: 1,
-            padding: '6px 8px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #334155)',
-            background: 'var(--bg-input, #0f172a)',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '0.8rem',
-          }}
+          style={{ flex: '1 1 100px' }}
         />
         <input
           type="text"
+          className="form-input"
           placeholder="Digits/Product"
           value={aliasDigits}
           onChange={(e) => setAliasDigits(e.target.value)}
-          style={{
-            flex: 1,
-            padding: '6px 8px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #334155)',
-            background: 'var(--bg-input, #0f172a)',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '0.8rem',
-          }}
+          style={{ flex: '1 1 100px' }}
         />
         <input
           type="text"
+          className="form-input"
           placeholder="Account ID"
           value={aliasAccountId}
           onChange={(e) => setAliasAccountId(e.target.value)}
-          style={{
-            flex: 1.5,
-            padding: '6px 8px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color, #334155)',
-            background: 'var(--bg-input, #0f172a)',
-            color: 'var(--text-primary, #f8fafc)',
-            fontSize: '0.8rem',
-          }}
+          style={{ flex: '1.5 1 140px' }}
         />
         <button
           type="button"
+          className="btn btn-secondary"
           onClick={handleAssignAlias}
-          style={{ whiteSpace: 'nowrap', fontSize: '0.8rem', padding: '6px 10px' }}
+          style={{ whiteSpace: 'nowrap', fontSize: '0.85rem' }}
         >
           Assign alias
         </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-        <button type="button" onClick={handlePickFolder}>Pick folder</button>
-        <button type="button" onClick={handleCheckFolder}>Check folder</button>
-        <button type="button" onClick={handleListFiles}>List files</button>
-        <button type="button" onClick={handleWriteTest}>Write test.txt</button>
-        <button type="button" onClick={handleAppendLines}>Append 3 lines</button>
-        <button type="button" onClick={handleReadFile}>Read events-test.jsonl</button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleReadSms}>
+        <button type="button" className="btn btn-secondary" onClick={handlePickFolder}>Pick folder</button>
+        <button type="button" className="btn btn-secondary" onClick={handleCheckFolder}>Check folder</button>
+        <button type="button" className="btn btn-secondary" onClick={handleListFiles}>List files</button>
+        <button type="button" className="btn btn-secondary" onClick={handleWriteTest}>Write test.txt</button>
+        <button type="button" className="btn btn-secondary" onClick={handleAppendLines}>Append 3 lines</button>
+        <button type="button" className="btn btn-secondary" onClick={handleReadFile}>Read events-test.jsonl</button>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleReadSms}>
           Read last 20 SMS (sender + 40 chars)
         </button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleParseLast100Sms}>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleParseLast100Sms}>
           Parse last 100 SMS (dry run)
         </button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleShowMaskedUnparsed}>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleShowMaskedUnparsed}>
           Show masked unparsed messages (screen only)
         </button>
 
         {/* Phase P4 Sync Controls */}
-        <button type="button" onClick={handleInitDevice}>Init device</button>
-        <button type="button" onClick={handleWriteTestExpense}>Write test expense event</button>
-        <button type="button" onClick={handleSyncNow}>Sync now</button>
-        <button type="button" onClick={handleRebuildFromLogs}>Rebuild from logs</button>
-        <button type="button" onClick={handleWriteFakeOtherDeviceFile}>Write fake other-device file</button>
-        <button type="button" onClick={handleShowExpenseCountAndTotal}>Show expense count and total</button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handlePrintRawFirstRow}>
+        <button type="button" className="btn btn-secondary" onClick={handleInitDevice}>Init device</button>
+        <button type="button" className="btn btn-secondary" onClick={handleWriteTestExpense}>Write test expense event</button>
+        <button type="button" className="btn btn-secondary" onClick={handleSyncNow}>Sync now</button>
+        <button type="button" className="btn btn-secondary" onClick={handleRebuildFromLogs}>Rebuild from logs</button>
+        <button type="button" className="btn btn-secondary" onClick={handleWriteFakeOtherDeviceFile}>Write fake other-device file</button>
+        <button type="button" className="btn btn-secondary" onClick={handleShowExpenseCountAndTotal}>Show expense count and total</button>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handlePrintRawFirstRow}>
           Print raw first row of listExpenses (debug)
         </button>
 
         {/* Phase P7e-1 SMS Pipeline Debug */}
-        <button type="button" onClick={handleListSenders}>List senders</button>
-        <button type="button" onClick={handleShowReviewCounts}>Show review counts by type</button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleScanSmsNow}>
+        <button type="button" className="btn btn-secondary" onClick={handleListSenders}>List senders</button>
+        <button type="button" className="btn btn-secondary" onClick={handleShowReviewCounts}>Show review counts by type</button>
+        <button type="button" className="btn btn-primary" style={{ gridColumn: 'span 2' }} onClick={handleScanSmsNow}>
           Scan SMS now (writes!)
         </button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={handleInboxProbe}>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleInboxProbe}>
           Inbox probe
         </button>
-        <button type="button" style={{ gridColumn: 'span 2' }} onClick={() => setShowStatementProbe(true)}>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={() => setShowStatementProbe(true)}>
           Statement probe
+        </button>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={() => setShowSampleStatement(true)}>
+          Load sample statement (testbank)
         </button>
       </div>
 

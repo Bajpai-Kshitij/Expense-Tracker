@@ -16,6 +16,45 @@ import { rowsToState } from '../core/db/index.js';
 import { formatPaise } from '../core/format/money.js';
 import { formatDateDisplay } from '../core/format/dates.js';
 
+class ItemErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('Review item render crashed:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="card" style={{ marginBottom: '14px', borderLeft: '4px solid var(--danger, #ef4444)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--danger, #ef4444)' }}>Item cannot be shown</h4>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                This item has corrupted or incomplete data.
+              </p>
+            </div>
+            {this.props.onDismiss && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={this.props.onDismiss}
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function ReviewScreen({
   db,
   writer,
@@ -301,6 +340,27 @@ export default function ReviewScreen({
     }
   };
 
+  // 9. Dismiss broken item
+  const handleDismissBrokenItem = async (item) => {
+    try {
+      if (writer && item?.id) {
+        await writer.write('review.resolved', {
+          reviewId: item.id,
+          decision: 'dismissed',
+        });
+      }
+      if (db && item?.id) {
+        await markReviewResolved(db, item.id);
+      }
+      showToast('Dismissed review item');
+      if (onReloadLookups) await onReloadLookups();
+      await loadData();
+    } catch (err) {
+      console.error('Failed to dismiss broken item:', err);
+      showToast(`Failed: ${err.message}`);
+    }
+  };
+
   return (
     <div>
       {/* Header */}
@@ -380,61 +440,64 @@ export default function ReviewScreen({
               ✓ No unknown accounts waiting for assignment.
             </div>
           ) : (
-            grouped.unknownAccounts.map((item) => {
-              const digitsOrProd = item.payload?.digits || item.payload?.product || '';
-              const stableKey = `${item.payload?.issuer || ''}|${digitsOrProd}`;
-              const waitingCount = heldCountMap[stableKey] || 1;
-              const desc = describeUnknownAccount(item, waitingCount, accounts);
+            grouped.unknownAccounts.map((item) => (
+              <ItemErrorBoundary key={item.id} onDismiss={() => handleDismissBrokenItem(item)}>
+                {(() => {
+                  const digitsOrProd = item.payload?.digits || item.payload?.product || '';
+                  const stableKey = `${item.payload?.issuer || ''}|${digitsOrProd}`;
+                  const waitingCount = heldCountMap[stableKey] || 1;
+                  const desc = describeUnknownAccount(item, waitingCount, accounts);
+                  const selectedAccId = selectedAccountForUnknown[item.id] || desc.suggestions[0]?.id || '';
 
-              const selectedAccId = selectedAccountForUnknown[item.id] || desc.suggestions[0]?.id || '';
+                  return (
+                    <div className="card" style={{ marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>{desc.title}</h3>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', fontWeight: 600 }}>
+                          {desc.subtitle}
+                        </span>
+                      </div>
 
-              return (
-                <div key={item.id} className="card" style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>{desc.title}</h3>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', fontWeight: 600 }}>
-                      {desc.subtitle}
-                    </span>
-                  </div>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                        Link these messages to an existing account or create a new one.
+                      </p>
 
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-                    Link these messages to an existing account or create a new one.
-                  </p>
+                      <div style={{ marginBottom: '12px' }}>
+                        <label className="form-label" style={{ fontSize: '0.8rem' }}>Choose Account</label>
+                        <select
+                          className="form-input"
+                          value={selectedAccId}
+                          onChange={(e) => setSelectedAccountForUnknown({ ...selectedAccountForUnknown, [item.id]: e.target.value })}
+                        >
+                          {desc.suggestions.map((acc) => (
+                            <option key={acc.id} value={acc.id}>
+                              {acc.name} ({acc.owner} · {acc.type}{acc.lastDigits ? ` · XX${acc.lastDigits}` : ''})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                  <div style={{ marginBottom: '12px' }}>
-                    <label className="form-label" style={{ fontSize: '0.8rem' }}>Choose Account</label>
-                    <select
-                      className="form-input"
-                      value={selectedAccId}
-                      onChange={(e) => setSelectedAccountForUnknown({ ...selectedAccountForUnknown, [item.id]: e.target.value })}
-                    >
-                      {desc.suggestions.map((acc) => (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.name} ({acc.owner} · {acc.type}{acc.lastDigits ? ` · XX${acc.lastDigits}` : ''})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => handleAssignAlias(item, selectedAccId)}
-                    >
-                      Use this account
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleOpenCreateAccount(item)}
-                    >
-                      Create new account
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => handleAssignAlias(item, selectedAccId)}
+                        >
+                          Use this account
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => handleOpenCreateAccount(item)}
+                        >
+                          Create new account
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </ItemErrorBoundary>
+            ))
           )}
         </div>
       )}
@@ -530,120 +593,125 @@ export default function ReviewScreen({
               ✓ No duplicate candidates waiting for review.
             </div>
           ) : (
-            grouped.possibleDuplicates.map((item) => {
-              const desc = describeDuplicate(item, allExpenses);
+            grouped.possibleDuplicates.map((item) => (
+              <ItemErrorBoundary key={item.id} onDismiss={() => handleDismissBrokenItem(item)}>
+                {(() => {
+                  const desc = describeDuplicate(item, allExpenses);
 
-              if (desc.stale) {
-                return (
-                  <div key={item.id} className="card" style={{ marginBottom: '14px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <h4 style={{ margin: 0, fontSize: '0.95rem' }}>Duplicate review item (Stale)</h4>
-                        <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                          One of the expenses in this duplicate check was deleted.
-                        </p>
+                  if (desc.stale) {
+                    return (
+                      <div className="card" style={{ marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '0.95rem' }}>Duplicate review item (Stale)</h4>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              One of the expenses in this duplicate check was deleted.
+                            </p>
+                          </div>
+                          <button type="button" className="btn btn-secondary" onClick={() => handleRemoveStale(item)}>
+                            Remove
+                          </button>
+                        </div>
                       </div>
-                      <button type="button" className="btn btn-secondary" onClick={() => handleRemoveStale(item)}>
-                        Remove
-                      </button>
+                    );
+                  }
+
+                  const imp = desc.imported || {};
+                  const manualList = Array.isArray(desc.manual) ? desc.manual : [];
+                  const chosenCandidateId = selectedDuplicateCandidate[item.id] || manualList[0]?.id;
+                  const man = manualList.find((m) => m?.id === chosenCandidateId) || manualList[0] || {};
+
+                  return (
+                    <div className="card" style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Possible Duplicate Expense</span>
+                        {desc.differences?.length > 0 && (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 600 }}>
+                            Differs in: {desc.differences.join(', ')}
+                          </span>
+                        )}
+                      </div>
+
+                      {manualList.length > 1 && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <label className="form-label" style={{ fontSize: '0.8rem' }}>Choose Manual Candidate</label>
+                          <select
+                            className="form-input"
+                            value={chosenCandidateId}
+                            onChange={(e) => setSelectedDuplicateCandidate({ ...selectedDuplicateCandidate, [item.id]: e.target.value })}
+                          >
+                            {manualList.map((cand, idx) => (
+                              <option key={cand?.id || idx} value={cand?.id}>
+                                Candidate {idx + 1}: {formatPaise(cand?.amount_paise ?? cand?.amountPaise)} · {cand?.merchant_raw || cand?.brand} ({cand?.date})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Side-by-side card */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                        {/* Imported */}
+                        <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', padding: '10px' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '4px' }}>
+                            IMPORTED FROM SMS
+                          </div>
+                          <div style={{ fontSize: '1rem', fontWeight: 700 }}>
+                            {formatPaise(imp.amount_paise ?? imp.amountPaise)}
+                          </div>
+                          <div style={{ fontSize: '0.8rem' }}>{formatDateDisplay(imp.date)}</div>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{imp.merchant_raw || imp.brand || 'No merchant'}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Category: {categoriesMap[imp.category_id || imp.categoryId]?.name || 'None'}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Account: {accountsMap[imp.account_id || imp.accountId]?.name || 'None'}
+                          </div>
+                          {imp.note && <div style={{ fontSize: '0.75rem', fontStyle: 'italic', marginTop: '2px' }}>"{imp.note}"</div>}
+                        </div>
+
+                        {/* Manual */}
+                        <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', padding: '10px' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginBottom: '4px' }}>
+                            MANUALLY ENTERED
+                          </div>
+                          <div style={{ fontSize: '1rem', fontWeight: 700 }}>
+                            {formatPaise(man.amount_paise ?? man.amountPaise)}
+                          </div>
+                          <div style={{ fontSize: '0.8rem' }}>{formatDateDisplay(man.date)}</div>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{man.merchant_raw || man.brand || 'No merchant'}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Category: {categoriesMap[man.category_id || man.categoryId]?.name || 'None'}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Account: {accountsMap[man.account_id || man.accountId]?.name || 'None'}
+                          </div>
+                          {man.note && <div style={{ fontSize: '0.75rem', fontStyle: 'italic', marginTop: '2px' }}>"{man.note}"</div>}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => handleResolveDuplicateMerge(item, desc)}
+                        >
+                          Same expense - merge
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => handleResolveDuplicateKeepBoth(item)}
+                        >
+                          Different - keep both
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              }
-
-              const imp = desc.imported;
-              const chosenCandidateId = selectedDuplicateCandidate[item.id] || desc.manual[0]?.id;
-              const man = desc.manual.find((m) => m.id === chosenCandidateId) || desc.manual[0];
-
-              return (
-                <div key={item.id} className="card" style={{ marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Possible Duplicate Expense</span>
-                    {desc.differences?.length > 0 && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 600 }}>
-                        Differs in: {desc.differences.join(', ')}
-                      </span>
-                    )}
-                  </div>
-
-                  {desc.manual.length > 1 && (
-                    <div style={{ marginBottom: '12px' }}>
-                      <label className="form-label" style={{ fontSize: '0.8rem' }}>Choose Manual Candidate</label>
-                      <select
-                        className="form-input"
-                        value={chosenCandidateId}
-                        onChange={(e) => setSelectedDuplicateCandidate({ ...selectedDuplicateCandidate, [item.id]: e.target.value })}
-                      >
-                        {desc.manual.map((cand, idx) => (
-                          <option key={cand.id} value={cand.id}>
-                            Candidate {idx + 1}: {formatPaise(cand.amount_paise ?? cand.amountPaise)} · {cand.merchant_raw || cand.brand} ({cand.date})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Side-by-side card */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-                    {/* Imported */}
-                    <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', padding: '10px' }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '4px' }}>
-                        IMPORTED FROM SMS
-                      </div>
-                      <div style={{ fontSize: '1rem', fontWeight: 700 }}>
-                        {formatPaise(imp.amount_paise ?? imp.amountPaise)}
-                      </div>
-                      <div style={{ fontSize: '0.8rem' }}>{formatDateDisplay(imp.date)}</div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{imp.merchant_raw || imp.brand || 'No merchant'}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        Category: {categoriesMap[imp.category_id || imp.categoryId]?.name || 'None'}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        Account: {accountsMap[imp.account_id || imp.accountId]?.name || 'None'}
-                      </div>
-                      {imp.note && <div style={{ fontSize: '0.75rem', fontStyle: 'italic', marginTop: '2px' }}>"{imp.note}"</div>}
-                    </div>
-
-                    {/* Manual */}
-                    <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', padding: '10px' }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginBottom: '4px' }}>
-                        MANUALLY ENTERED
-                      </div>
-                      <div style={{ fontSize: '1rem', fontWeight: 700 }}>
-                        {formatPaise(man.amount_paise ?? man.amountPaise)}
-                      </div>
-                      <div style={{ fontSize: '0.8rem' }}>{formatDateDisplay(man.date)}</div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{man.merchant_raw || man.brand || 'No merchant'}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        Category: {categoriesMap[man.category_id || man.categoryId]?.name || 'None'}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        Account: {accountsMap[man.account_id || man.accountId]?.name || 'None'}
-                      </div>
-                      {man.note && <div style={{ fontSize: '0.75rem', fontStyle: 'italic', marginTop: '2px' }}>"{man.note}"</div>}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => handleResolveDuplicateMerge(item, desc)}
-                    >
-                      Same expense - merge
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => handleResolveDuplicateKeepBoth(item)}
-                    >
-                      Different - keep both
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+                  );
+                })()}
+              </ItemErrorBoundary>
+            ))
           )}
         </div>
       )}
@@ -656,74 +724,91 @@ export default function ReviewScreen({
               ✓ No unparsed messages.
             </div>
           ) : (
-            grouped.unparsed.map((item) => {
-              const desc = describeUnparsed(item);
-              const isRevealed = Boolean(revealedTexts[item.id]);
+            grouped.unparsed.map((item) => (
+              <ItemErrorBoundary key={item.id} onDismiss={() => handleDismissBrokenItem(item)}>
+                {(() => {
+                  const desc = describeUnparsed(item);
+                  const isRevealed = Boolean(revealedTexts[item.id]);
 
-              return (
-                <div key={item.id} className="card" style={{ marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{desc.address || 'Unknown Sender'}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      {desc.receivedAt ? formatDateDisplay(typeof desc.receivedAt === 'number' ? new Date(desc.receivedAt).toISOString() : String(desc.receivedAt)) : ''}
-                    </span>
-                  </div>
+                  const formatReceivedAt = (val) => {
+                    if (!val) return '';
+                    try {
+                      if (typeof val === 'number') {
+                        if (isNaN(val)) return '';
+                        return formatDateDisplay(new Date(val).toISOString());
+                      }
+                      return formatDateDisplay(String(val));
+                    } catch {
+                      return String(val);
+                    }
+                  };
 
-                  {/* Preview / Revealed text */}
-                  <div style={{ background: 'var(--bg-secondary)', padding: '10px', borderRadius: '6px', marginBottom: '8px', fontSize: '0.85rem', wordBreak: 'break-word' }}>
-                    {isRevealed ? revealedTexts[item.id] : desc.preview}
-                  </div>
+                  return (
+                    <div className="card" style={{ marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{desc.address || 'Unknown Sender'}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          {formatReceivedAt(desc.receivedAt)}
+                        </span>
+                      </div>
 
-                  <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginBottom: '10px' }}>
-                    ⚠️ Check names before sharing.
-                  </div>
+                      {/* Preview / Revealed text */}
+                      <div style={{ background: 'var(--bg-secondary)', padding: '10px', borderRadius: '6px', marginBottom: '8px', fontSize: '0.85rem', wordBreak: 'break-word' }}>
+                        {isRevealed ? revealedTexts[item.id] : desc.preview}
+                      </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {!isRevealed && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                        onClick={() => handleRevealFullText(item)}
-                      >
-                        Show full text
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      onClick={() => {
-                        const dateStr = item.payload?.date ? String(item.payload.date).slice(0, 10) : '';
-                        onAddManually({
-                          date: dateStr,
-                          note: 'from SMS',
-                        });
-                      }}
-                    >
-                      Add manually
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.8rem', padding: '6px 10px' }}
-                      onClick={() => handleCopyMasked(desc)}
-                    >
-                      Copy masked text
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.8rem', padding: '6px 10px', color: 'var(--danger)' }}
-                      onClick={() => handleDismissUnparsed(item)}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+                      <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginBottom: '10px' }}>
+                        ⚠️ Check names before sharing.
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {!isRevealed && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                            onClick={() => handleRevealFullText(item)}
+                          >
+                            Show full text
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                          onClick={() => {
+                            const dateStr = item.payload?.date ? String(item.payload.date).slice(0, 10) : '';
+                            onAddManually({
+                              date: dateStr,
+                              note: 'from SMS',
+                            });
+                          }}
+                        >
+                          Add manually
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                          onClick={() => handleCopyMasked(desc)}
+                        >
+                          Copy masked text
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '6px 10px', color: 'var(--danger)' }}
+                          onClick={() => handleDismissUnparsed(item)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </ItemErrorBoundary>
+            ))
           )}
         </div>
       )}

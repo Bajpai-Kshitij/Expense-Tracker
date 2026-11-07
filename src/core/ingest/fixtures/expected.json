@@ -492,5 +492,117 @@
     "availLimitPaise": null,
     "dedupeKey": "ref:131000000001",
     "linkHint": null
+  },
+  "joint_debit_person.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 21000,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-06",
+    "time": null,
+    "merchantRaw": "PERSON ONE",
+    "refNo": "111111111101",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111101",
+    "linkHint": null
+  },
+  "joint_debit_truncated.txt": {
+    "status": "parsed",
+    "kind": "spend",
+    "direction": "debit",
+    "amountPaise": 13300,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-06",
+    "time": null,
+    "merchantRaw": "M S KALYANG BAK",
+    "refNo": "111111111102",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111102",
+    "linkHint": null
+  },
+  "joint_debit_household.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 4000000,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-04",
+    "time": null,
+    "merchantRaw": "TEST OWNER LONGNAME",
+    "refNo": "111111111103",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111103",
+    "linkHint": null
+  },
+  "joint_debit_household_truncated.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "debit",
+    "amountPaise": 4000000,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-04",
+    "time": null,
+    "merchantRaw": "TEST OWNER LONG",
+    "refNo": "111111111104",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111104",
+    "linkHint": null
+  },
+  "joint_credit_other.txt": {
+    "status": "parsed",
+    "kind": "income",
+    "direction": "credit",
+    "amountPaise": 2000000,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-04",
+    "time": null,
+    "merchantRaw": "PERSON TWO",
+    "refNo": "111111111105",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111105",
+    "linkHint": null
+  },
+  "joint_credit_household.txt": {
+    "status": "parsed",
+    "kind": "transfer",
+    "direction": "credit",
+    "amountPaise": 4000000,
+    "accountId": "acc_joint",
+    "accountHint": {
+      "issuer": "icici",
+      "digits": "425"
+    },
+    "date": "2026-11-04",
+    "time": null,
+    "merchantRaw": "TEST OWNER LONGNAME",
+    "refNo": "111111111106",
+    "availLimitPaise": null,
+    "dedupeKey": "ref:111111111106",
+    "linkHint": null
+  },
+  "joint_credit_unknown_layout.txt": {
+    "status": "unparsed",
+    "reason": "no_parser"
   }
 }

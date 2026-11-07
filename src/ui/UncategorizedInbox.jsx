@@ -4,7 +4,7 @@ import { formatPaise } from '../core/format/money.js';
 import { formatDateDisplay } from '../core/format/dates.js';
 import { suggestRule } from '../core/categorize/suggest.js';
 import { compilePattern } from '../core/categorize/pattern.js';
-import { findSimilar, planReapply, applyPlan } from '../core/categorize/categorize.js';
+import { findSimilar, planReapply, applyPlan, getNewRulePriority } from '../core/categorize/index.js';
 
 export default function UncategorizedInbox({
   db,
@@ -118,6 +118,7 @@ export default function UncategorizedInbox({
       category,
       pattern: suggestion.pattern,
       mode: suggestion.mode,
+      kind: 'spend',
     });
   };
 
@@ -137,13 +138,11 @@ export default function UncategorizedInbox({
 
   // Create rule & apply to target + similar
   const handleCreateRuleAndApply = async () => {
-    if (!writer || !sheet.expense || !sheet.category || !patternValidation.ok) return;
+    if (!writer || !sheet.expense || !patternValidation.ok) return;
 
     try {
       const ruleId = `rule_${Date.now()}`;
-      const priorities = rules.map((r) => r.priority).filter((p) => typeof p === 'number');
-      const minPriority = priorities.length > 0 ? Math.min(...priorities) : 50;
-      const newPriority = Math.max(1, minPriority - 10);
+      const newPriority = getNewRulePriority(rules);
 
       const newRule = {
         id: ruleId,
@@ -151,8 +150,8 @@ export default function UncategorizedInbox({
         field: 'merchant',
         pattern: sheet.pattern.trim(),
         mode: sheet.mode,
-        categoryId: sheet.category.id,
-        kind: null,
+        categoryId: sheet.category?.id || null,
+        kind: sheet.kind || null,
         active: true,
         note: `Created from inbox for "${sheet.expense.merchant_raw || ''}"`,
       };
@@ -161,26 +160,84 @@ export default function UncategorizedInbox({
       await writer.write('rule.upserted', newRule);
 
       // 2. Lock target expense
+      const patch = { category_locked: 1 };
+      if (sheet.category?.id) patch.categoryId = sheet.category.id;
+      if (sheet.kind) patch.kind = sheet.kind;
       await writer.write('expense.updated', {
         expenseId: sheet.expense.id,
-        patch: { categoryId: sheet.category.id, category_locked: 1 },
+        patch,
       });
 
       // 3. Batch apply to similar expenses (unlocked)
+      const batchPatch = { category_locked: 0 };
+      if (sheet.category?.id) batchPatch.categoryId = sheet.category.id;
+      if (sheet.kind) batchPatch.kind = sheet.kind;
       for (const id of similarMatches) {
         await writer.write('expense.updated', {
           expenseId: id,
-          patch: { categoryId: sheet.category.id, category_locked: 0 },
+          patch: batchPatch,
         });
       }
 
       const totalUpdated = similarMatches.length + 1;
-      showToast(`Rule created! ${totalUpdated} ${totalUpdated === 1 ? 'expense' : 'expenses'} categorized.`);
-      setSheet({ open: false, expense: null, category: null, pattern: '', mode: 'words' });
+      showToast(`Rule created! ${totalUpdated} ${totalUpdated === 1 ? 'expense' : 'expenses'} updated.`);
+      setSheet({ open: false, expense: null, category: null, pattern: '', mode: 'words', kind: 'spend' });
       await loadInboxData();
       if (onRefreshLookups) await onRefreshLookups();
     } catch (err) {
       console.error('Failed to create rule and apply:', err);
+    }
+  };
+
+  // Button: "Not an expense (Transfer)"
+  const handleMarkTransfer = async (exp) => {
+    if (!writer || !exp) return;
+    try {
+      const merchant = (exp.merchant_raw || exp.note || '').trim();
+      const suggestion = suggestRule(merchant);
+      const pattern = (suggestion ? suggestion.pattern : merchant).trim();
+      if (!pattern) {
+        showToast('Cannot create rule without merchant text');
+        return;
+      }
+
+      const newPriority = getNewRulePriority(rules);
+      const newRule = {
+        id: `rule_${Date.now()}`,
+        priority: newPriority,
+        field: 'merchant',
+        pattern,
+        mode: 'words',
+        categoryId: null,
+        kind: 'transfer',
+        active: true,
+        note: `Transfer rule created from inbox for "${merchant}"`,
+      };
+
+      await writer.write('rule.upserted', newRule);
+
+      // Lock target expense as transfer
+      await writer.write('expense.updated', {
+        expenseId: exp.id,
+        patch: { kind: 'transfer', category_locked: 1 },
+      });
+
+      // Batch apply to similar uncategorized unlocked expenses
+      const similar = findSimilar(expenses, { pattern, mode: 'words' }).filter((id) => id !== exp.id);
+      for (const id of similar) {
+        await writer.write('expense.updated', {
+          expenseId: id,
+          patch: { kind: 'transfer', category_locked: 0 },
+        });
+      }
+
+      const totalUpdated = similar.length + 1;
+      showToast(`Marked ${totalUpdated} ${totalUpdated === 1 ? 'expense' : 'expenses'} as Transfer`);
+      await loadInboxData();
+      if (onRefreshLookups) await onRefreshLookups();
+    } catch (e) {
+      console.error('Failed to mark transfer:', e);
+      showToast(`Failed: ${e.message}`);
     }
   };
 
@@ -331,6 +388,17 @@ export default function UncategorizedInbox({
                     More...
                   </button>
                 </div>
+
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-start' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '4px 8px', minHeight: '28px' }}
+                    onClick={() => handleMarkTransfer(exp)}
+                  >
+                    Not an expense (Transfer)
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -379,6 +447,21 @@ export default function UncategorizedInbox({
                     ✓ Valid pattern ({similarMatches.length} similar matches)
                   </div>
                 )}
+              </div>
+
+              {/* Count as Selector */}
+              <div className="form-group">
+                <label className="form-label">Count as</label>
+                <select
+                  className="form-select"
+                  value={sheet.kind || 'spend'}
+                  onChange={(e) => setSheet((prev) => ({ ...prev, kind: e.target.value }))}
+                >
+                  <option value="spend">Spend</option>
+                  <option value="fixed">Fixed</option>
+                  <option value="transfer">Transfer</option>
+                  <option value="income">Income</option>
+                </select>
               </div>
 
               {/* Mode Toggle */}

@@ -579,6 +579,203 @@ describe('PHASE P1 - Event Core', () => {
       const state2 = applyEvents(state1, [eRuleDelete]);
       expect(state2.rules['rule_swiggy']).toBeUndefined();
     });
+
+    describe('expense.linked event handling', () => {
+      it('is idempotent on duplicate keys', () => {
+        const createEv = createEvent({
+          id: 'ev_c1',
+          type: 'expense.created',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_1', dedupeKey: 'k_dedupe_1', amountPaise: 1000 },
+        });
+        const linkEv1 = createEvent({
+          id: 'ev_l1',
+          type: 'expense.linked',
+          dev: 'dev-a',
+          seq: 2,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_1', key: 'k_stmt_1', via: 'statement' },
+        });
+        const linkEv2 = createEvent({
+          id: 'ev_l2',
+          type: 'expense.linked',
+          dev: 'dev-a',
+          seq: 3,
+          ts: '2026-10-30T10:02:00.000Z',
+          data: { expenseId: 'e_1', key: 'k_stmt_1', via: 'statement' },
+        });
+
+        const state = applyEvents(createEmptyState(), [createEv, linkEv1, linkEv2]);
+        expect(state.expenses['e_1'].linkedKeys.has('k_stmt_1')).toBe(true);
+        expect(state.expenses['e_1'].linkedKeys.has('k_dedupe_1')).toBe(true);
+        expect(state.expenses['e_1'].linkedKeys.size).toBe(2);
+      });
+
+      it('applies in any order with identical result', () => {
+        const createEv = createEvent({
+          id: 'ev_c1',
+          type: 'expense.created',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_1', dedupeKey: 'k_dedupe_1' },
+        });
+        const linkA = createEvent({
+          id: 'ev_la',
+          type: 'expense.linked',
+          dev: 'dev-a',
+          seq: 2,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_1', key: 'key_A', via: 'sms' },
+        });
+        const linkB = createEvent({
+          id: 'ev_lb',
+          type: 'expense.linked',
+          dev: 'dev-b',
+          seq: 1,
+          ts: '2026-10-30T10:02:00.000Z',
+          data: { expenseId: 'e_1', key: 'key_B', via: 'statement' },
+        });
+
+        const state1 = applyEvents(createEmptyState(), [createEv, linkA, linkB]);
+        const state2 = applyEvents(createEmptyState(), [createEv, linkB, linkA]);
+
+        expect(Array.from(state1.expenses['e_1'].linkedKeys).sort()).toEqual(
+          Array.from(state2.expenses['e_1'].linkedKeys).sort()
+        );
+        expect(state1.expenses['e_1'].linkedKeys.has('key_A')).toBe(true);
+        expect(state1.expenses['e_1'].linkedKeys.has('key_B')).toBe(true);
+        expect(state1.expenses['e_1'].linkedKeys.has('k_dedupe_1')).toBe(true);
+      });
+
+      it('unions keys from two devices simultaneously', () => {
+        const createEv = createEvent({
+          id: 'ev_c1',
+          type: 'expense.created',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_1' },
+        });
+        const linkDev1 = createEvent({
+          id: 'ev_l1',
+          type: 'expense.linked',
+          dev: 'dev-1',
+          seq: 1,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_1', key: 'dev1_key', via: 'statement' },
+        });
+        const linkDev2 = createEvent({
+          id: 'ev_l2',
+          type: 'expense.linked',
+          dev: 'dev-2',
+          seq: 1,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_1', key: 'dev2_key', via: 'sms' },
+        });
+
+        const state = applyEvents(createEmptyState(), [createEv, linkDev1, linkDev2]);
+        expect(state.expenses['e_1'].linkedKeys.has('dev1_key')).toBe(true);
+        expect(state.expenses['e_1'].linkedKeys.has('dev2_key')).toBe(true);
+      });
+
+      it('parks link to an unknown expense and applies it when expense.created arrives', () => {
+        const linkEv = createEvent({
+          id: 'ev_orphan_link',
+          type: 'expense.linked',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T09:00:00.000Z',
+          data: { expenseId: 'e_future', key: 'stmt_ref_99', via: 'statement' },
+        });
+
+        const stateParked = applyEvents(createEmptyState(), [linkEv]);
+        expect(stateParked.parkedEvents.length).toBe(1);
+        expect(stateParked.parkedEvents[0].id).toBe('ev_orphan_link');
+        expect(stateParked.expenses['e_future']).toBeUndefined();
+
+        const createEv = createEvent({
+          id: 'ev_c_future',
+          type: 'expense.created',
+          dev: 'dev-b',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_future', dedupeKey: 'sms_99', amountPaise: 5000 },
+        });
+
+        const finalState = applyEvents(stateParked, [createEv]);
+        expect(finalState.parkedEvents.length).toBe(0);
+        expect(finalState.expenses['e_future']).toBeDefined();
+        expect(finalState.expenses['e_future'].linkedKeys.has('stmt_ref_99')).toBe(true);
+        expect(finalState.expenses['e_future'].linkedKeys.has('sms_99')).toBe(true);
+      });
+
+      it('ignores link event on a deleted expense', () => {
+        const createEv = createEvent({
+          id: 'ev_c1',
+          type: 'expense.created',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_del', dedupeKey: 'k_del' },
+        });
+        const delEv = createEvent({
+          id: 'ev_d1',
+          type: 'expense.deleted',
+          dev: 'dev-a',
+          seq: 2,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_del' },
+        });
+        const linkEv = createEvent({
+          id: 'ev_l_after',
+          type: 'expense.linked',
+          dev: 'dev-b',
+          seq: 1,
+          ts: '2026-10-30T10:02:00.000Z',
+          data: { expenseId: 'e_del', key: 'k_stmt_ignore', via: 'statement' },
+        });
+
+        const state = applyEvents(createEmptyState(), [createEv, delEv, linkEv]);
+        expect(state.expenses['e_del'].deleted).toBe(true);
+        expect(state.expenses['e_del'].linkedKeys?.has('k_stmt_ignore')).toBeFalsy();
+        expect(state.appliedEventIds.has('ev_l_after')).toBe(true);
+      });
+
+      it('preserves existing linkedKeys when expense.created merges into existing id', () => {
+        const createEv1 = createEvent({
+          id: 'ev_c1',
+          type: 'expense.created',
+          dev: 'dev-a',
+          seq: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          data: { expenseId: 'e_same', dedupeKey: 'k_dev_a', amountPaise: 2000 },
+        });
+        const linkEv = createEvent({
+          id: 'ev_l1',
+          type: 'expense.linked',
+          dev: 'dev-a',
+          seq: 2,
+          ts: '2026-10-30T10:01:00.000Z',
+          data: { expenseId: 'e_same', key: 'k_linked_prior', via: 'statement' },
+        });
+        const createEv2 = createEvent({
+          id: 'ev_c2',
+          type: 'expense.created',
+          dev: 'dev-b',
+          seq: 1,
+          ts: '2026-10-30T10:02:00.000Z',
+          data: { expenseId: 'e_same', dedupeKey: 'k_dev_b', note: 'from dev b' },
+        });
+
+        const state = applyEvents(createEmptyState(), [createEv1, linkEv, createEv2]);
+        expect(state.expenses['e_same'].linkedKeys.has('k_dev_a')).toBe(true);
+        expect(state.expenses['e_same'].linkedKeys.has('k_linked_prior')).toBe(true);
+        expect(state.expenses['e_same'].linkedKeys.has('k_dev_b')).toBe(true);
+      });
+    });
   });
 
   describe('Isolation check', () => {
