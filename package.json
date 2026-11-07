@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cap:sync": "cap sync android",
-    "cap:open": "cap open android"
+    "cap:open": "cap open android",
+    "release": "bash scripts/release.sh",
+    "release:verify": "bash scripts/release.sh --verify"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^6.0.2",

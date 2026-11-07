@@ -6,6 +6,12 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+*.jks
+*.keystore
+android/keystore.properties
+keystore.properties
+android/app/release/
+android/app/build/outputs/
 *.log
 .idea/
 .DS_Store

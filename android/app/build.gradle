@@ -1,5 +1,26 @@
 apply plugin: 'com.android.application'
 
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (!keystorePropertiesFile.exists()) {
+    keystorePropertiesFile = file('keystore.properties')
+}
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def resolveKeystorePath(String path) {
+    if (!path) return null
+    if (path.startsWith('~' + File.separator) || path == '~') {
+        return new File(System.getProperty('user.home'), path.substring(1))
+    }
+    def f = new File(path)
+    if (f.isAbsolute()) {
+        return f
+    }
+    return rootProject.file(path)
+}
+
 android {
     namespace "com.bajpai.expense.tracker"
     compileSdk rootProject.ext.compileSdkVersion
@@ -8,7 +29,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +37,35 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                def storeFilePath = keystoreProperties['storeFile']
+                storeFile resolveKeystorePath(storeFilePath)
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
+            shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def isReleaseTask = taskGraph.allTasks.any { task ->
+        task.project == project && task.name.toLowerCase().contains('release') && !task.name.toLowerCase().contains('test')
+    }
+    if (isReleaseTask && !keystorePropertiesFile.exists()) {
+        throw new GradleException("keystore.properties not found, see RELEASE.md")
     }
 }
 

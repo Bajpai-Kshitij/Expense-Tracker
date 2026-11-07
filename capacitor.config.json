@@ -2,8 +2,13 @@
   "appId": "com.bajpai.expense.tracker",
   "appName": "Expense Tracker",
   "webDir": "dist",
+  "loggingBehavior": "none",
   "server": {
     "androidScheme": "https"
+  },
+  "android": {
+    "webContentsDebuggingEnabled": false,
+    "loggingBehavior": "none"
   }
 }
 
