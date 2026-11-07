@@ -47,3 +47,4 @@ describe('BUG C - Rules prioritization and renumbering', () => {
     expect(swappedB.priority).toBe(10);
   });
 });
+

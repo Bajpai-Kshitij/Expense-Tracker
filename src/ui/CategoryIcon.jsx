@@ -95,3 +95,4 @@ export default function CategoryIcon({ category, size = 40 }) {
     </div>
   );
 }
+

@@ -7,7 +7,7 @@ import { createMemoryStorage } from '../sync/testing/memoryStorage.js';
 import { createWriter } from '../sync/writer.js';
 import { syncNow, rebuildFromLogs } from '../sync/engine.js';
 import { migrate } from '../db/migrations.js';
-import { rowsToState, totals, listExpenses, dumpDatabase } from '../db/index.js';
+import { rowsToState, totals, listExpenses, dumpDatabase, uncategorizedInbox } from '../db/index.js';
 import { seedIfEmpty } from '../seed/seed.js';
 import { seedBrandsIfEmpty } from '../seed/brandSeed.js';
 
@@ -45,7 +45,7 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
       brands: state.brands,
       rules: state.rules,
       categories: state.categories,
-      ownerNames: ['Test Owner'],
+      ownerNames: ['Test Owner', 'Test Owner Longname'],
     };
 
     const files = fs
@@ -60,7 +60,7 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
     }));
   });
 
-  it('End-to-end inbox: 20 expenses, 2 held, 3 unparsed, 10 ignored, net spend 492134 / 991934', async () => {
+  it('End-to-end inbox: 26 expenses, 2 held, 4 unparsed, 10 ignored, net spend 526434 / 1026234', async () => {
     const plan = planImport({
       messages: inboxMessages,
       ctx,
@@ -69,30 +69,31 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
       allowlist,
     });
 
-    expect(plan.summary.scanned).toBe(37);
-    expect(plan.summary.created).toBe(20);
+    expect(plan.summary.scanned).toBe(44);
+    expect(plan.summary.created).toBe(26);
     expect(plan.summary.held).toBe(2);
-    expect(plan.summary.unparsed).toBe(3);
+    expect(plan.summary.unparsed).toBe(4);
     expect(plan.summary.ignored).toBe(10);
     expect(plan.summary.unknown).toBe(1);
     expect(plan.summary.duplicateTransaction).toBe(1); // hdfc_flattened duplicate of hdfc_upi_1
 
     await applyImport({ plan, writer, db });
 
-    // Net spend (default filters, fixed excluded) is 492134 paise
+    // Net spend (default filters, fixed excluded) is 526434 paise
     const totalExcl = await totals(db, { includeFixed: false });
-    expect(totalExcl.netPaise).toBe(492134);
+    expect(totalExcl.netPaise).toBe(526434);
 
-    // With includeFixed it is 991934 paise
+    // With includeFixed it is 1026234 paise
     const totalIncl = await totals(db, { includeFixed: true });
-    expect(totalIncl.netPaise).toBe(991934);
+    expect(totalIncl.netPaise).toBe(1026234);
 
-    // NEFT credits count as income only (not in spend)
+    // Income rows count only as income (not in spend)
     const incomeRows = await listExpenses(db, { includeFixed: true });
     const neftRows = incomeRows.filter((r) => r.kind === 'income');
-    expect(neftRows).toHaveLength(2);
-    expect(neftRows[0].amount_paise).toBe(10000000);
+    expect(neftRows).toHaveLength(3);
+    expect(neftRows[0].amount_paise).toBe(2000000);
     expect(neftRows[1].amount_paise).toBe(10000000);
+    expect(neftRows[2].amount_paise).toBe(10000000);
   });
 
   it('Scanning the same inbox twice creates 0 new expenses and 0 new events', async () => {
@@ -119,7 +120,7 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
 
     expect(plan2.summary.created).toBe(0);
     expect(plan2.events).toHaveLength(0);
-    expect(plan2.summary.duplicateMessage).toBe(36); // All stored messages skipped by rawHash
+    expect(plan2.summary.duplicateMessage).toBe(43); // All stored messages skipped by rawHash
   });
 
   it('Scanning in a shuffled order gives an identical database dump', async () => {
@@ -229,8 +230,8 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
     const expensesB = await listExpenses(dbB, { includeFixed: true });
 
     // Exactly ONE expense per transaction on both devices
-    expect(expensesA).toHaveLength(20);
-    expect(expensesB).toHaveLength(20);
+    expect(expensesA).toHaveLength(26);
+    expect(expensesB).toHaveLength(26);
     expect(expensesA.map((e) => e.id).sort()).toEqual(expensesB.map((e) => e.id).sort());
 
     // Rebuild from logs achieves complete canonical convergence
@@ -240,8 +241,8 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
     const dumpA = await dumpDatabase(db);
     const dumpB = await dumpDatabase(dbB);
 
-    expect(dumpA.expenses).toHaveLength(20);
-    expect(dumpB.expenses).toHaveLength(20);
+    expect(dumpA.expenses).toHaveLength(26);
+    expect(dumpB.expenses).toHaveLength(26);
     expect(dumpA.expenses).toEqual(dumpB.expenses);
   });
 
@@ -318,13 +319,13 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
     });
 
     expect(plan2.summary.created).toBe(0);
-    expect(plan2.summary.duplicateTransaction).toBe(21); // All parsed transactions recognized as duplicates
+    expect(plan2.summary.duplicateTransaction).toBe(27); // All parsed transactions recognized as duplicates
 
     // Step 2 completes
     await applyImport({ plan: plan2, writer, db });
 
     const rawAfter = await db.query('SELECT count(*) as c FROM raw_messages;');
-    expect(Number(rawAfter[0].c)).toBe(36); // All messages successfully recorded locally
+    expect(Number(rawAfter[0].c)).toBe(43); // All messages successfully recorded locally
   });
 
   it('A deleted imported expense is not resurrected by a rescan', async () => {
@@ -408,6 +409,78 @@ describe('src/core/ingest/pipeline.js - E2E SMS Pipeline', () => {
     await ensureUnparsedReviewItems(db, state);
 
     const countAfter = await db.query('SELECT count(*) as c FROM review_queue;');
-    expect(Number(countAfter[0].c)).toBe(5); // 3 unparsed + 2 held unknown_accounts
+    expect(Number(countAfter[0].c)).toBe(6); // 4 unparsed + 2 held unknown_accounts
+  });
+
+  it('FEATURE E TESTS: same joint SMS on 2 devices produces 1 expense; rescanning creates 0; joint credits never in uncategorized inbox', async () => {
+    // 1. Joint SMS messages
+    const jointCreditMsg = {
+      address: 'VM-ICICIB',
+      body: 'Dear Customer, Acct XX425 is credited with Rs 20000.00 on 04-Nov-26 from PERSON TWO. UPI:111111111105-ICICI Bank.',
+      date: 1700000000000,
+    };
+    const jointDebitMsg = {
+      address: 'VM-ICICIB',
+      body: 'ICICI Bank Acct XX425 debited for Rs 210.00 on 06-Nov-26; PERSON ONE credited. UPI:111111111101. Call 18002662 for dispute. SMS BLOCK 425 to 9215676766.',
+      date: 1700000001000,
+    };
+    const jointMessages = [jointCreditMsg, jointDebitMsg];
+
+    // Setup Device 1 & Device 2 sharing the same sync storage
+    const jointStorage = createMemoryStorage();
+    const db1 = await createSqljsAdapter();
+    await migrate(db1);
+    const writer1 = createWriter({ deviceId: 'dev_1', storage: jointStorage, db: db1 });
+    await writer1.init();
+    await seedIfEmpty({ writer: writer1, db: db1 });
+
+    const db2 = await createSqljsAdapter();
+    await migrate(db2);
+    const writer2 = createWriter({ deviceId: 'dev_2', storage: jointStorage, db: db2 });
+    await writer2.init();
+    await seedIfEmpty({ writer: writer2, db: db2 });
+
+    const jointCtx = {
+      ...ctx,
+      ownerNames: ['Test Owner Longname'],
+    };
+
+    // Both devices parse and import the exact same joint SMS
+    const plan1 = planImport({ messages: jointMessages, ctx: jointCtx, state: rowsToState({ expenses: [] }), seenHashes: new Set(), allowlist: ['VM-ICICIB'] });
+    const plan2 = planImport({ messages: jointMessages, ctx: jointCtx, state: rowsToState({ expenses: [] }), seenHashes: new Set(), allowlist: ['VM-ICICIB'] });
+    expect(plan1.summary.created).toBe(2);
+    expect(plan2.summary.created).toBe(2);
+
+    await applyImport({ plan: plan1, writer: writer1, db: db1 });
+    await applyImport({ plan: plan2, writer: writer2, db: db2 });
+
+    // Sync dev_1 and dev_2
+    await syncNow({ storage: jointStorage, db: db1, deviceId: 'dev_1' });
+    await syncNow({ storage: jointStorage, db: db2, deviceId: 'dev_2' });
+    await syncNow({ storage: jointStorage, db: db1, deviceId: 'dev_1' });
+
+    // (1) The same joint SMS parsed on two simulated devices produces ONE expense per transaction after sync
+    const expenses1 = await listExpenses(db1, { includeFixed: true });
+    const expenses2 = await listExpenses(db2, { includeFixed: true });
+    expect(expenses1).toHaveLength(2);
+    expect(expenses2).toHaveLength(2);
+    expect(expenses1.map((e) => e.id).sort()).toEqual(expenses2.map((e) => e.id).sort());
+
+    // (2) Rescanning creates 0 new expenses
+    const rawRows1 = await db1.query('SELECT hash FROM raw_messages;');
+    const rescanPlan = planImport({
+      messages: jointMessages,
+      ctx: jointCtx,
+      state: rowsToState({ expenses: expenses1 }),
+      seenHashes: new Set(rawRows1.map((r) => r.hash)),
+      allowlist: ['VM-ICICIB'],
+    });
+    expect(rescanPlan.summary.created).toBe(0);
+    expect(rescanPlan.events).toHaveLength(0);
+
+    // (3) Imported joint credits never appear in the Uncategorized inbox
+    const inboxRows = await uncategorizedInbox(db1);
+    const creditInInbox = inboxRows.filter((r) => r.kind === 'income' || r.kind === 'transfer' || r.direction === 'credit');
+    expect(creditInInbox).toHaveLength(0);
   });
 });

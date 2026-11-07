@@ -108,3 +108,4 @@ export function swapRulePriorities(ruleA, ruleB) {
     { ...ruleB, priority: prioA },
   ];
 }
+
