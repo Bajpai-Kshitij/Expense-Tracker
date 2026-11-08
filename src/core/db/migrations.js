@@ -156,6 +156,29 @@ export const MIGRATIONS = [
       await db.exec('CREATE INDEX IF NOT EXISTS idx_expense_keys_expense_id ON expense_keys(expense_id);');
     },
   },
+  {
+    version: 3,
+    name: 'emi_and_bank_category_fields',
+    up: async (db) => {
+      const tableInfo = await db.query('PRAGMA table_info(expenses);');
+      const colNames = (tableInfo || []).map((col) => col.name);
+      const colsToAdd = [
+        ['emi_plan_key', 'TEXT'],
+        ['emi_no', 'INTEGER'],
+        ['emi_total', 'INTEGER'],
+        ['emi_part', 'TEXT'],
+        ['emi_monthly_paise', 'INTEGER'],
+        ['emi_finish_date', 'TEXT'],
+        ['emi_outstanding_paise', 'INTEGER'],
+        ['bank_category', 'TEXT'],
+      ];
+      for (const [col, type] of colsToAdd) {
+        if (!colNames.includes(col)) {
+          await db.exec(`ALTER TABLE expenses ADD COLUMN ${col} ${type};`);
+        }
+      }
+    },
+  },
 ];
 
 /**

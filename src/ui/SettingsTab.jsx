@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import NativeDebug from './NativeDebug.jsx';
+import { restoreDefaultCategories } from '../core/health/categories.js';
 
 export default function SettingsTab({
   folderUri,
@@ -18,12 +19,46 @@ export default function SettingsTab({
   onNavigateToStatementImport,
   onNavigateToAccounts,
   onNavigateToReview,
+  onNavigateToEmi,
   openReviewCount = 0,
+  categories = [],
+  writer,
+  db,
+  runtime,
+  onReloadLookups = () => {},
 }) {
   const [labelInput, setLabelInput] = useState(deviceLabel || '');
   const [isUpdatingLabel, setIsUpdatingLabel] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [rebuildLoading, setRebuildLoading] = useState(false);
+  const [healthStatus, setHealthStatus] = useState('');
+  const [restoringCategories, setRestoringCategories] = useState(false);
+
+  const handleRestoreDefaultCategories = async () => {
+    try {
+      setRestoringCategories(true);
+      setHealthStatus('');
+      const activeWriter = writer || runtime?.writer;
+      const activeDb = db || runtime?.db;
+      if (!activeWriter) {
+        setHealthStatus('LogWriter not ready. Please sync or connect folder first.');
+        return;
+      }
+      const res = await restoreDefaultCategories({
+        writer: activeWriter,
+        db: activeDb,
+        categories,
+      });
+      setHealthStatus(`Restored ${res.restoredCount} default ${res.restoredCount === 1 ? 'category' : 'categories'}.`);
+      if (onReloadLookups) {
+        await onReloadLookups();
+      }
+    } catch (err) {
+      setHealthStatus(`Restore failed: ${err.message}`);
+    } finally {
+      setRestoringCategories(false);
+    }
+  };
 
   const handleSaveLabel = async () => {
     const trimmed = labelInput.trim();
@@ -174,6 +209,23 @@ export default function SettingsTab({
         <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
       </div>
 
+      {/* Loans & EMIs Screen */}
+      <div
+        className="card"
+        onClick={onNavigateToEmi}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '2px' }}>
+            📊 Loans & EMIs
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            Track active EMI plans, monthly commitments, and outstanding balances
+          </p>
+        </div>
+        <span style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginLeft: '12px' }}>➔</span>
+      </div>
+
       {/* Review Queue */}
       <div
         className="card"
@@ -287,13 +339,43 @@ export default function SettingsTab({
         Raw message text is purged after 60 days
       </div>
 
+      {/* Data Health Section */}
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <div className="card-header">
+          <span className="card-title">🩺 Data health</span>
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          Check and repair internal data integrity or restore seed categories.
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={restoringCategories}
+          onClick={handleRestoreDefaultCategories}
+        >
+          {restoringCategories ? 'Restoring...' : 'Restore default categories'}
+        </button>
+        {healthStatus && (
+          <div style={{ marginTop: '10px', fontSize: '0.8rem', color: healthStatus.includes('failed') ? 'var(--danger)' : 'var(--success)' }}>
+            {healthStatus}
+          </div>
+        )}
+      </div>
+
       {/* Developer Tools (Collapsed) */}
       <details className="card" style={{ cursor: 'pointer' }}>
         <summary style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
           Developer Tools (P3 Debug Interface)
         </summary>
         <div style={{ marginTop: '14px' }}>
-          <NativeDebug />
+          <NativeDebug
+            db={db}
+            writer={writer}
+            runtime={runtime}
+            categories={categories}
+            folderUri={folderUri}
+            onReloadLookups={onReloadLookups}
+          />
         </div>
       </details>
     </div>

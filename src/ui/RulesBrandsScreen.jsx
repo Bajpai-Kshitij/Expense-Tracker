@@ -6,6 +6,7 @@ import {
   getNewRulePriority,
   swapRulePriorities,
 } from '../core/categorize/index.js';
+import { categoryLabel, buildFullCategory } from '../core/health/categories.js';
 import CategoryIcon from './CategoryIcon.jsx';
 
 export default function RulesBrandsScreen({
@@ -350,7 +351,7 @@ export default function RulesBrandsScreen({
   const handleToggleCategoryArchived = async (cat) => {
     if (!writer) return;
     try {
-      const updated = { ...cat, archived: !cat.archived };
+      const updated = buildFullCategory({ ...cat, archived: !cat.archived });
       await writer.write('category.upserted', updated);
       if (onReloadLookups) await onReloadLookups();
       showToast(`Category ${updated.archived ? 'archived' : 'restored'}`);
@@ -382,13 +383,13 @@ export default function RulesBrandsScreen({
   const handleSaveCategory = async () => {
     if (!writer || !catModal.name.trim()) return;
     try {
-      const catObj = {
+      const catObj = buildFullCategory({
         id: catModal.category ? catModal.category.id : `cat_${Date.now()}`,
         name: catModal.name.trim(),
         icon: catModal.icon || '🏷️',
         color: catModal.color || '#3b82f6',
         archived: catModal.category ? Boolean(catModal.category.archived) : false,
-      };
+      });
 
       await writer.write('category.upserted', catObj);
       setCatModal({ ...catModal, open: false, category: null });
@@ -491,7 +492,7 @@ export default function RulesBrandsScreen({
               <div className="tester-col">
                 <span className="tester-lbl">Target Category</span>
                 <span className="tester-val" style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                  {categoriesMap[testerResult.categoryId]?.name || 'Uncategorized'}
+                  {categoryLabel(testerResult.categoryId, categories)}
                 </span>
               </div>
               <div className="tester-col">
@@ -543,7 +544,7 @@ export default function RulesBrandsScreen({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0', fontSize: '0.85rem' }}>
                     <span>➔</span>
                     <span className="cat-chip-dot" style={{ backgroundColor: cat?.color || '#94a3b8' }} />
-                    <span style={{ fontWeight: 600 }}>{cat?.name || 'Uncategorized'}</span>
+                    <span style={{ fontWeight: 600 }}>{categoryLabel(rule.categoryId, categories)}</span>
                     {rule.kind && <span className={`badge badge-${rule.kind}`}>{rule.kind}</span>}
                     <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
                       (field: {rule.field || 'merchant'})
@@ -653,7 +654,7 @@ export default function RulesBrandsScreen({
                     {cat ? (
                       <>
                         <span className="cat-chip-dot" style={{ backgroundColor: cat.color || '#94a3b8' }} />
-                        <span style={{ fontWeight: 600 }}>{cat.name}</span>
+                        <span style={{ fontWeight: 600 }}>{categoryLabel(brand.categoryId || brand.default_category_id || brand.defaultCategoryId, categories)}</span>
                       </>
                     ) : (
                       <span style={{ color: 'var(--text-secondary)' }}>(None)</span>

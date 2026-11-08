@@ -18,14 +18,28 @@ import { maskForSharing } from '../core/ingest/mask.js';
 import { listSenders } from '../core/ingest/senders.js';
 import { scanSms } from '../native/smsScan.js';
 import { assignAccountAlias, listReviewItems, countOpenReviewItems } from '../core/ingest/review.js';
+import { runReviewItemsSelfTest } from '../core/review/viewModels.js';
+import {
+  getCategoriesDump,
+  getCategoriesDumpFromLogs,
+  getCategoryEventCounts,
+  readAllSharedEvents,
+} from '../core/health/categories.js';
 import StatementProbe from './StatementProbe.jsx';
 import StatementImport from './StatementImport.jsx';
 
-export default function NativeDebug() {
+export default function NativeDebug({
+  db,
+  writer,
+  runtime,
+  categories,
+  folderUri: propFolderUri,
+  onReloadLookups,
+} = {}) {
   const [showStatementProbe, setShowStatementProbe] = useState(false);
   const [showSampleStatement, setShowSampleStatement] = useState(false);
   const [folderUri, setFolderUri] = useState(
-    () => localStorage.getItem('debug_folder_uri') || ''
+    () => propFolderUri || localStorage.getItem('debug_folder_uri') || ''
   );
   const [ownerNamesInput, setOwnerNamesInput] = useState('');
   const [isSavingOwnerNames, setIsSavingOwnerNames] = useState(false);
@@ -96,6 +110,7 @@ export default function NativeDebug() {
   };
 
   const getRuntime = async () => {
+    if (runtime) return runtime;
     if (!folderUri) {
       throw new Error('Pick a folder first!');
     }
@@ -616,6 +631,88 @@ export default function NativeDebug() {
     }
   };
 
+  const handleReviewItemsSelfTest = async () => {
+    try {
+      log('Running Review items self-test...');
+      const targetDb = db || runtimeRef.current?.db || (await getRuntime()).db;
+      const reviewRows = await targetDb.query('SELECT * FROM review_queue;');
+      const expRows = await targetDb.query('SELECT * FROM expenses;');
+      const accRows = await targetDb.query('SELECT * FROM accounts;');
+
+      const parsedItems = reviewRows.map((r) => {
+        let payload = r.payload;
+        if (typeof payload === 'string') {
+          try {
+            payload = JSON.parse(payload);
+          } catch {}
+        }
+        return { ...r, payload };
+      });
+
+      const expMap = {};
+      for (const e of expRows) expMap[e.id] = e;
+
+      const parsedAccs = accRows.map((a) => (a.extras ? { ...JSON.parse(a.extras), id: a.id } : a));
+
+      const result = runReviewItemsSelfTest(parsedItems, { accounts: parsedAccs, expenses: expMap });
+      const outputMsg = [
+        `Review items self-test complete:`,
+        `- Total items tested: ${parsedItems.length}`,
+        `- OK count: ${result.okCount}`,
+        `- Failed count: ${result.failCount}`,
+        `- Failing types: ${result.failingTypes.length > 0 ? result.failingTypes.join(', ') : '(none)'}`,
+        `- First error messages:`,
+        ...(result.errorMessages.length > 0
+          ? result.errorMessages.map((m, idx) => `  ${idx + 1}. ${m}`)
+          : ['  (none)']),
+      ].join('\n');
+
+      log(outputMsg);
+    } catch (err) {
+      log(`Review items self-test failed: ${err.message}`);
+    }
+  };
+
+  const handleCategoriesDump = async () => {
+    try {
+      log('Running (1) Categories dump (in-memory state)...');
+      const targetDb = db || runtimeRef.current?.db || (await getRuntime()).db;
+      const targetStorage = runtime?.storage || (await getRuntime()).storage;
+      const catRows = await targetDb.query('SELECT * FROM categories ORDER BY id ASC;');
+      const inMemCats = catRows.map((c) => (c.extras ? { ...JSON.parse(c.extras), id: c.id } : c));
+      const allEvents = await readAllSharedEvents(targetStorage);
+
+      const dump = getCategoriesDump(inMemCats, allEvents);
+      log(`(1) Categories Dump (${dump.length} categories):\n${JSON.stringify(dump, null, 2)}`);
+    } catch (err) {
+      log(`Categories dump failed: ${err.message}`);
+    }
+  };
+
+  const handleCategoriesDumpFromLogs = async () => {
+    try {
+      log('Running (2) Categories dump from logs (recomputed from shared folder)...');
+      const targetStorage = runtime?.storage || (await getRuntime()).storage;
+      const allEvents = await readAllSharedEvents(targetStorage);
+      const dump = getCategoriesDumpFromLogs(allEvents);
+      log(`(2) Categories Dump From Logs (${dump.length} categories):\n${JSON.stringify(dump, null, 2)}`);
+    } catch (err) {
+      log(`Categories dump from logs failed: ${err.message}`);
+    }
+  };
+
+  const handleCategoryEventCounts = async () => {
+    try {
+      log('Running (3) Category event counts...');
+      const targetStorage = runtime?.storage || (await getRuntime()).storage;
+      const allEvents = await readAllSharedEvents(targetStorage);
+      const counts = getCategoryEventCounts(allEvents);
+      log(`(3) Category Event Counts (${counts.length} categories):\n${JSON.stringify(counts, null, 2)}`);
+    } catch (err) {
+      log(`Category event counts failed: ${err.message}`);
+    }
+  };
+
   if (showStatementProbe) {
     return <StatementProbe onBack={() => setShowStatementProbe(false)} initialOwnerNames={ownerNamesInput} />;
   }
@@ -746,6 +843,18 @@ export default function NativeDebug() {
         {/* Phase P7e-1 SMS Pipeline Debug */}
         <button type="button" className="btn btn-secondary" onClick={handleListSenders}>List senders</button>
         <button type="button" className="btn btn-secondary" onClick={handleShowReviewCounts}>Show review counts by type</button>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleReviewItemsSelfTest}>
+          Review items self-test
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={handleCategoriesDump}>
+          (1) Categories dump
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={handleCategoriesDumpFromLogs}>
+          (2) Categories dump from logs
+        </button>
+        <button type="button" className="btn btn-secondary" style={{ gridColumn: 'span 2' }} onClick={handleCategoryEventCounts}>
+          (3) Categories event count
+        </button>
         <button type="button" className="btn btn-primary" style={{ gridColumn: 'span 2' }} onClick={handleScanSmsNow}>
           Scan SMS now (writes!)
         </button>

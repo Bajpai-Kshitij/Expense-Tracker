@@ -3,6 +3,7 @@ import { listExpenses, totals } from '../core/db/queries.js';
 import { normalizeFilters } from '../core/forms/filters.js';
 import { formatPaise } from '../core/format/money.js';
 import { formatDateDisplay } from '../core/format/dates.js';
+import { categoryLabel } from '../core/health/categories.js';
 
 export default function ExpensesTab({
   db,
@@ -195,7 +196,7 @@ export default function ExpensesTab({
               <option value="__uncategorized__">⚠️ Uncategorized</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}
+                  {categoryLabel(c.id, categories)}
                 </option>
               ))}
             </select>
@@ -305,7 +306,7 @@ export default function ExpensesTab({
         ) : (
           <div>
             {displayedExpenses.map((exp) => {
-              const catName = categoriesMap[exp.category_id]?.name || 'Uncategorized';
+              const catName = categoryLabel(exp.category_id, categoriesMap);
               const accName = accountsMap[exp.account_id]?.name || '';
               const isCredit = exp.direction === 'credit';
               const linkId = exp.linkId || exp.link_id;

@@ -47,6 +47,54 @@ export function stateToRows(state) {
           ? exp.statementFileHash
           : null,
       link_id: exp.link_id !== undefined ? exp.link_id : (exp.linkId || null),
+      emi_plan_key:
+        exp.emi_plan_key !== undefined
+          ? exp.emi_plan_key
+          : exp.emiPlanKey !== undefined
+          ? exp.emiPlanKey
+          : null,
+      emi_no:
+        exp.emi_no !== undefined
+          ? exp.emi_no
+          : exp.emiNo !== undefined
+          ? exp.emiNo
+          : null,
+      emi_total:
+        exp.emi_total !== undefined
+          ? exp.emi_total
+          : exp.emiTotal !== undefined
+          ? exp.emiTotal
+          : null,
+      emi_part:
+        exp.emi_part !== undefined
+          ? exp.emi_part
+          : exp.emiPart !== undefined
+          ? exp.emiPart
+          : null,
+      emi_monthly_paise:
+        exp.emi_monthly_paise !== undefined
+          ? exp.emi_monthly_paise
+          : exp.emiMonthlyPaise !== undefined
+          ? exp.emiMonthlyPaise
+          : null,
+      emi_finish_date:
+        exp.emi_finish_date !== undefined
+          ? exp.emi_finish_date
+          : exp.emiFinishDate !== undefined
+          ? exp.emiFinishDate
+          : null,
+      emi_outstanding_paise:
+        exp.emi_outstanding_paise !== undefined
+          ? exp.emi_outstanding_paise
+          : exp.emiOutstandingPaise !== undefined
+          ? exp.emiOutstandingPaise
+          : null,
+      bank_category:
+        exp.bank_category !== undefined
+          ? exp.bank_category
+          : exp.bankCategory !== undefined
+          ? exp.bankCategory
+          : null,
     }));
 
   const categories = Object.values(state.categories || {})
@@ -203,6 +251,30 @@ export function rowsToState(rows = {}) {
     }
     if (row.link_id !== null && row.link_id !== undefined) {
       exp.linkId = row.link_id;
+    }
+    if (row.emi_plan_key !== null && row.emi_plan_key !== undefined) {
+      exp.emiPlanKey = row.emi_plan_key;
+    }
+    if (row.emi_no !== null && row.emi_no !== undefined) {
+      exp.emiNo = Number(row.emi_no);
+    }
+    if (row.emi_total !== null && row.emi_total !== undefined) {
+      exp.emiTotal = Number(row.emi_total);
+    }
+    if (row.emi_part !== null && row.emi_part !== undefined) {
+      exp.emiPart = row.emi_part;
+    }
+    if (row.emi_monthly_paise !== null && row.emi_monthly_paise !== undefined) {
+      exp.emiMonthlyPaise = Number(row.emi_monthly_paise);
+    }
+    if (row.emi_finish_date !== null && row.emi_finish_date !== undefined) {
+      exp.emiFinishDate = row.emi_finish_date;
+    }
+    if (row.emi_outstanding_paise !== null && row.emi_outstanding_paise !== undefined) {
+      exp.emiOutstandingPaise = Number(row.emi_outstanding_paise);
+    }
+    if (row.bank_category !== null && row.bank_category !== undefined) {
+      exp.bankCategory = row.bank_category;
     }
     exp.linkedKeys = new Set();
     if (exp.dedupeKey) exp.linkedKeys.add(exp.dedupeKey);

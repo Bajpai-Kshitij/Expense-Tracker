@@ -6,6 +6,7 @@ import {
   describeUnparsed,
   scanSummaryLines,
   reviewBadgeCount,
+  runReviewItemsSelfTest,
 } from './viewModels.js';
 
 describe('viewModels pure logic', () => {
@@ -201,6 +202,39 @@ describe('viewModels pure logic', () => {
     expect(describeUnparsed(null)).toEqual({ preview: '', receivedAt: '', address: '' });
     expect(() => describeUnparsed({ payload: null })).not.toThrow();
     expect(describeUnparsed({ payload: null })).toEqual({ preview: '', receivedAt: '', address: '' });
+  });
+
+  it('BUG 1 reproduction: groupReviewItems handles numeric epoch timestamps and missing fields without throwing', () => {
+    const items = [
+      { id: 'item_1', type: 'unknown_account', payload: { issuer: 'ICICI', digits: '1234', date: 1731000000000 } },
+      { id: 'item_2', type: 'unknown_account', payload: { issuer: 'HDFC', digits: '5678', date: 1731005000000 } },
+      { id: 'item_3', type: 'unparsed', payload: { body: 'test message', date: 1731002000000 } },
+      { id: 'item_4', type: 'possible_duplicate', payload: { date: null } },
+      null,
+      {},
+    ];
+    const grouped = groupReviewItems(items);
+    expect(grouped.unknownAccounts).toHaveLength(2);
+    expect(grouped.unknownAccounts[0].id).toBe('item_2'); // Newer timestamp first
+    expect(grouped.unknownAccounts[1].id).toBe('item_1');
+    expect(grouped.unparsed).toHaveLength(1);
+    expect(grouped.possibleDuplicates).toHaveLength(1);
+  });
+
+  it('runs runReviewItemsSelfTest over review items catching errors without throwing', () => {
+    const items = [
+      { id: '1', type: 'unknown_account', payload: { issuer: 'ICICI', digits: '1234' } },
+      { id: '2', type: 'unparsed', payload: { body: 'SMS from bank 9876543210' } },
+      { id: '3', type: 'possible_duplicate', payload: { importedId: 'exp_1', candidateIds: [] } },
+      null,
+      {},
+    ];
+
+    const result = runReviewItemsSelfTest(items, { accounts: [], expenses: {} });
+    expect(result.failCount).toBe(0);
+    expect(result.okCount).toBe(items.length);
+    expect(result.failingTypes).toEqual([]);
+    expect(result.errorMessages).toEqual([]);
   });
 });
 

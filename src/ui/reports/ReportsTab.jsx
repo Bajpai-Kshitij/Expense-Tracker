@@ -16,6 +16,7 @@ import {
   projectMonthEnd,
   buildInsights,
 } from '../../core/reports/index.js';
+import { categoryLabel } from '../../core/health/categories.js';
 
 import {
   categoryTotals,
@@ -404,7 +405,7 @@ export default function ReportsTab({
                   >
                     <div className="category-row-header">
                       <div className="category-name-group">
-                        <span>{item.name}</span>
+                        <span>{item.id === 'other' ? item.name : categoryLabel(item.id, categories)}</span>
                         {item.label && (
                           <span className="badge warning">({item.label})</span>
                         )}

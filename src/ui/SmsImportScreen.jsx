@@ -8,6 +8,11 @@ import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { rowsToState } from '../core/db/index.js';
 import { settings } from '../core/db/queries.js';
 import { formatDateDisplay } from '../core/format/dates.js';
+import {
+  findLikelyBankSenderAddresses,
+  removeReviewItemsFromDisallowedSenders,
+} from '../core/review/sendersCleanup.js';
+import { parseHouseholdNames } from '../core/review/household.js';
 
 export default function SmsImportScreen({
   db,
@@ -21,11 +26,15 @@ export default function SmsImportScreen({
   const [permissionError, setPermissionError] = useState('');
 
   const [discoveredSenders, setDiscoveredSenders] = useState([]);
+  const [cachedInboxMessages, setCachedInboxMessages] = useState([]);
+  const [senderSearch, setSenderSearch] = useState('');
   const [emptySenderCount, setEmptySenderCount] = useState(0);
   const [selectedSenders, setSelectedSenders] = useState([]);
   const [senderWarning, setSenderWarning] = useState('');
   const [scanningSenders, setScanningSenders] = useState(false);
+  const [removingDisallowed, setRemovingDisallowed] = useState(false);
 
+  const [ownerNamesList, setOwnerNamesList] = useState([]);
   const [ownerNamesInput, setOwnerNamesInput] = useState('');
   const [autoScan, setAutoScan] = useState(false);
   const [lastScanMs, setLastScanMs] = useState(null);
@@ -78,7 +87,11 @@ export default function SmsImportScreen({
         if (savedNamesJson && isMounted) {
           try {
             const parsed = JSON.parse(savedNamesJson);
-            if (Array.isArray(parsed)) setOwnerNamesInput(parsed.join(', '));
+            if (Array.isArray(parsed)) {
+              setOwnerNamesList(parseHouseholdNames(parsed));
+            } else if (typeof parsed === 'string') {
+              setOwnerNamesList(parseHouseholdNames(parsed));
+            }
           } catch {}
         }
 
@@ -138,6 +151,7 @@ export default function SmsImportScreen({
       setPermissionError('');
       const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
       const messages = await readSms({ sinceEpochMs: ninetyDaysAgo, limit: 2000, order: 'desc' });
+      setCachedInboxMessages(messages);
 
       const accountsRows = await db.query('SELECT * FROM accounts;');
       const state = rowsToState({ accounts: accountsRows });
@@ -145,19 +159,31 @@ export default function SmsImportScreen({
       setDiscoveredSenders(senders);
       setEmptySenderCount(senders.emptySenderCount || 0);
 
-      // Pre-tick saved allowlist senders or financial senders if none saved yet
-      if (selectedSenders.length === 0) {
-        const financialOnly = senders
-          .filter((s) => (s.financial ?? s.financialCount ?? 0) > 0)
-          .map((s) => s.address || s.sender);
-        setSelectedSenders(sanitizeAllowlist(financialOnly));
-      }
+      // Nothing is ticked by default unless already in saved allowlist
     } catch (err) {
       const mapped = mapPermissionError(err);
       setPermissionError(mapped);
     } finally {
       setScanningSenders(false);
     }
+  };
+
+  const handleSelectLikelyBanks = () => {
+    const likelyAddrs = findLikelyBankSenderAddresses(cachedInboxMessages);
+    const matched = discoveredSenders
+      .filter((s) => {
+        const addr = s.address || s.sender || '';
+        return likelyAddrs.has(addr) || /(?:axis|icici|hdfc|idfc)/i.test(addr);
+      })
+      .map((s) => s.address || s.sender);
+
+    const sanitized = sanitizeAllowlist(matched);
+    setSelectedSenders(sanitized);
+    showToast(`Selected ${sanitized.length} likely bank senders`);
+  };
+
+  const handleClearAllSenders = () => {
+    setSelectedSenders([]);
   };
 
   const toggleSender = (address) => {
@@ -168,6 +194,10 @@ export default function SmsImportScreen({
 
   const handleSaveSenders = async () => {
     const sanitized = sanitizeAllowlist(selectedSenders);
+    if (sanitized.length > 25) {
+      const confirmed = window.confirm('Banks usually have 3 to 8 senders. Save anyway?');
+      if (!confirmed) return;
+    }
     setSelectedSenders(sanitized);
     await settings.setSetting(db, 'sms_senders', JSON.stringify(sanitized));
     if (sanitized.length === 0) {
@@ -179,10 +209,40 @@ export default function SmsImportScreen({
     }
   };
 
-  const handleSaveOwnerNames = async () => {
-    const list = ownerNamesInput.split(',').map((s) => s.trim()).filter(Boolean);
-    await settings.setSetting(db, 'owner_names', JSON.stringify(list));
-    showToast('Saved owner names');
+  const handleRemoveDisallowedReviewItems = async () => {
+    try {
+      setRemovingDisallowed(true);
+      const res = await removeReviewItemsFromDisallowedSenders({
+        db,
+        writer,
+        allowlist: selectedSenders,
+      });
+      showToast(`Removed ${res.count} review ${res.count === 1 ? 'item' : 'items'}`);
+      const count = await countOpenReviewItems(db);
+      setReviewCount(count);
+      if (onReloadLookups) await onReloadLookups();
+    } catch (err) {
+      showToast(`Failed: ${err.message}`);
+    } finally {
+      setRemovingDisallowed(false);
+    }
+  };
+
+  const handleAddOwnerNames = async () => {
+    const parsed = parseHouseholdNames(ownerNamesInput);
+    if (parsed.length === 0) return;
+    const combined = parseHouseholdNames([...ownerNamesList, ...parsed]);
+    setOwnerNamesList(combined);
+    setOwnerNamesInput('');
+    await settings.setSetting(db, 'owner_names', JSON.stringify(combined));
+    showToast(`Saved ${combined.length} household names`);
+  };
+
+  const handleRemoveOwnerName = async (nameToRemove) => {
+    const remaining = ownerNamesList.filter((n) => n.toLowerCase() !== nameToRemove.toLowerCase());
+    setOwnerNamesList(remaining);
+    await settings.setSetting(db, 'owner_names', JSON.stringify(remaining));
+    showToast(`Removed ${nameToRemove}`);
   };
 
   const handleToggleAutoScan = async (checked) => {
@@ -254,6 +314,13 @@ export default function SmsImportScreen({
     }
   };
 
+  const filteredSenders = discoveredSenders.filter((s) => {
+    if (!senderSearch.trim()) return true;
+    const q = senderSearch.trim().toLowerCase();
+    const addr = (s.address || s.sender || '').toLowerCase();
+    return addr.includes(q);
+  });
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '8px' }}>
@@ -320,38 +387,76 @@ export default function SmsImportScreen({
         </button>
 
         {discoveredSenders.length > 0 && (
-          <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: '12px', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px' }}>
-            {discoveredSenders.map((s) => {
-              const address = s.address || s.sender || '';
-              const isChecked = selectedSenders.includes(address);
-              const finCount = s.financial ?? s.financialCount ?? 0;
-              const totCount = s.total ?? s.totalCount ?? 0;
-              return (
-                <label
-                  key={address}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 4px',
-                    borderBottom: '1px solid var(--border-color)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleSender(address)}
-                    />
-                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{address}</span>
-                  </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    {finCount} financial of {totCount} messages
-                  </span>
-                </label>
-              );
-            })}
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search senders..."
+                value={senderSearch}
+                onChange={(e) => setSenderSearch(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleSelectLikelyBanks}
+                title="Select likely banks"
+              >
+                Select likely banks
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleClearAllSenders}
+                title="Clear all"
+              >
+                Clear all
+              </button>
+            </div>
+
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Showing {filteredSenders.length} of {discoveredSenders.length} senders ({selectedSenders.length} selected)
+            </div>
+
+            <div style={{ maxHeight: '240px', overflowY: 'auto', marginBottom: '12px', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px' }}>
+              {filteredSenders.map((s) => {
+                const address = s.address || s.sender || '';
+                const isChecked = selectedSenders.includes(address);
+                const finCount = s.financial ?? s.financialCount ?? 0;
+                const totCount = s.total ?? s.totalCount ?? 0;
+                return (
+                  <label
+                    key={address}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 4px',
+                      borderBottom: '1px solid var(--border-color)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleSender(address)}
+                      />
+                      <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{address}</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {finCount} financial of {totCount} messages
+                    </span>
+                  </label>
+                );
+              })}
+              {filteredSenders.length === 0 && (
+                <div style={{ padding: '8px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  No senders matching &quot;{senderSearch}&quot;
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -370,10 +475,22 @@ export default function SmsImportScreen({
         <button
           type="button"
           className="btn btn-primary"
-          style={{ width: '100%' }}
+          style={{ width: '100%', marginBottom: '8px' }}
           onClick={handleSaveSenders}
         >
           Save Senders ({selectedSenders.length} selected)
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ width: '100%', fontSize: '0.8rem' }}
+          disabled={removingDisallowed}
+          onClick={handleRemoveDisallowedReviewItems}
+        >
+          {removingDisallowed
+            ? 'Removing review items...'
+            : 'Remove review items from senders that are not on the list'}
         </button>
       </div>
 
@@ -382,21 +499,72 @@ export default function SmsImportScreen({
         <div className="card-header">
           <span className="card-title">Household names (you and your wife, exactly as the bank prints them)</span>
         </div>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
           Used to recognise transfers to yourself.
         </p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            type="text"
+
+        {ownerNamesList.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+            {ownerNamesList.map((name) => (
+              <span
+                key={name}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'var(--chip-bg, #e2e8f0)',
+                  color: 'var(--chip-text, #1e293b)',
+                  borderRadius: '16px',
+                  padding: '4px 10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 500,
+                }}
+              >
+                {name}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveOwnerName(name)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    marginLeft: '2px',
+                    fontSize: '0.9rem',
+                    lineHeight: 1,
+                    color: 'var(--text-secondary)',
+                  }}
+                  title={`Remove ${name}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+          <textarea
             className="form-input"
+            rows={2}
             value={ownerNamesInput}
             onChange={(e) => setOwnerNamesInput(e.target.value)}
-            placeholder="e.g. John Doe, Jane Doe"
+            placeholder="Add names separated by commas or new lines, e.g. John Doe, Jane Doe"
+            style={{ resize: 'vertical' }}
           />
-          <button type="button" className="btn btn-secondary" onClick={handleSaveOwnerNames}>
-            Save
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleAddOwnerNames}
+            disabled={!ownerNamesInput.trim()}
+          >
+            Add name(s)
           </button>
         </div>
+
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+          💡 Add your wife&apos;s name too (used to recognise self-transfers between household accounts)
+        </p>
       </div>
 
       {/* Scan SMS Now Section */}

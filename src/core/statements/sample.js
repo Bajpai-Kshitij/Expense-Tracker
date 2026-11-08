@@ -2,7 +2,9 @@
  * Selects an informative structural sample of statement lines.
  *
  * Selection rules:
- * - First 25 lines of page 1 (header and summary)
+ * - First 70 lines of page 1 (header and summary)
+ * - Always include the 12 lines after any line containing "CREDIT SUMMARY", "Total Amount due" or "Previous Balance"
+ * - When issuer guess is icici, include every line containing "Amortization", "EMI", "DCC", "IGST", "Autodebit" and the 6 lines that follow "EMI / PERSONAL LOAN"
  * - Up to 5 header lines wherever found
  * - Up to 40 txn-like lines (spread: first 15, 10 from middle, last 15)
  * - Plus 3 lines before the first txn-like line and 3 after the last one
@@ -11,9 +13,12 @@
  * - Preserves original order, marks each with page and line numbers, removes duplicates
  */
 
-import { isTxnLikeLine, isHeaderLine } from './summary.js';
+import { isTxnLikeLine, isHeaderLine, summarizeStructure } from './summary.js';
 
 const KEYWORD_REGEX = /\b(?:total|opening|closing|payment|reversal|refund|emi|fee|interest|gst)\b/i;
+const SUMMARY_SECTION_REGEX = /(?:credit summary|total amount due|previous balance)/i;
+const ICICI_KEYWORDS_REGEX = /\b(?:amortization|emi|dcc|igst|autodebit)\b/i;
+const ICICI_EMI_LOAN_REGEX = /emi\s*\/\s*personal\s+loan/i;
 
 export function pickProbeSample(lines = [], summary = null, opts = {}) {
   if (!Array.isArray(lines) || lines.length === 0) {
@@ -22,15 +27,59 @@ export function pickProbeSample(lines = [], summary = null, opts = {}) {
 
   const selectedIndices = new Set();
 
-  // 1. First 25 lines of page 1
+  // 1. First 70 lines of page 1
+  let page1Count = 0;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (l && l.page === 1 && l.lineNo <= 25) {
-      selectedIndices.add(i);
+    if (l && l.page === 1) {
+      if ((l.lineNo != null && l.lineNo <= 70) || (l.lineNo == null && page1Count < 70)) {
+        selectedIndices.add(i);
+      }
+      page1Count += 1;
     }
   }
 
-  // 2. Up to 5 header lines wherever found
+  // 2. Always include the 12 lines after any line containing "CREDIT SUMMARY", "Total Amount due" or "Previous Balance"
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l && typeof l.text === 'string' && SUMMARY_SECTION_REGEX.test(l.text)) {
+      selectedIndices.add(i);
+      const afterEnd = Math.min(lines.length, i + 13);
+      for (let k = i + 1; k < afterEnd; k++) {
+        selectedIndices.add(k);
+      }
+    }
+  }
+
+  // 3. When issuer guess is icici, include every line containing "Amortization", "EMI", "DCC", "IGST", "Autodebit"
+  //    and the 6 lines that follow "EMI / PERSONAL LOAN"
+  const rawIssuer = summary?.issuerGuess ?? opts?.issuerGuess;
+  const issuerGuess = (
+    rawIssuer != null
+      ? rawIssuer
+      : (summary ? '' : (lines.length > 0 ? summarizeStructure(lines).issuerGuess : ''))
+  )?.toLowerCase();
+  const isIcici = issuerGuess === 'icici';
+
+  if (isIcici) {
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (l && typeof l.text === 'string') {
+        if (ICICI_KEYWORDS_REGEX.test(l.text)) {
+          selectedIndices.add(i);
+        }
+        if (ICICI_EMI_LOAN_REGEX.test(l.text)) {
+          selectedIndices.add(i);
+          const followEnd = Math.min(lines.length, i + 7);
+          for (let k = i + 1; k < followEnd; k++) {
+            selectedIndices.add(k);
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Up to 5 header lines wherever found
   let headerCount = 0;
   for (let i = 0; i < lines.length; i++) {
     if (headerCount >= 5) break;
@@ -41,7 +90,7 @@ export function pickProbeSample(lines = [], summary = null, opts = {}) {
     }
   }
 
-  // 3. Txn-like lines (up to 40)
+  // 5. Txn-like lines (up to 40)
   const txnIndices = [];
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
@@ -87,7 +136,7 @@ export function pickProbeSample(lines = [], summary = null, opts = {}) {
     }
   }
 
-  // 4. Up to 20 keyword lines
+  // 6. Up to 20 keyword lines
   let keywordLinesCount = 0;
   for (let i = 0; i < lines.length; i++) {
     if (keywordLinesCount >= 20) break;
@@ -100,8 +149,7 @@ export function pickProbeSample(lines = [], summary = null, opts = {}) {
     }
   }
 
-  // 5. Sort by original index to keep original order
+  // 7. Sort by original index to keep original order
   const sortedIndices = Array.from(selectedIndices).sort((a, b) => a - b);
   return sortedIndices.map((idx) => lines[idx]);
 }
-

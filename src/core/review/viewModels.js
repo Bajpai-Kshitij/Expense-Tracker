@@ -33,20 +33,26 @@ export function groupReviewItems(items = []) {
     }
   }
 
-  const getDate = (it) => {
-    const p = it.payload || {};
-    return p.date || p.receivedAt || p.received_at || it.date || it.createdAt || it.created_at || '';
+  const getTimestamp = (it) => {
+    if (!it || typeof it !== 'object') return 0;
+    const p = (it.payload && typeof it.payload === 'object') ? it.payload : {};
+    const val = p.date ?? p.receivedAt ?? p.received_at ?? it.date ?? it.createdAt ?? it.created_at;
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (val instanceof Date) return isNaN(val.getTime()) ? 0 : val.getTime();
+    const parsed = Date.parse(String(val));
+    return isNaN(parsed) ? 0 : parsed;
   };
 
   const sortByNewest = (a, b) => {
-    const dateA = getDate(a);
-    const dateB = getDate(b);
-    if (dateA && dateB) {
-      return dateB.localeCompare(dateA);
+    const timeA = getTimestamp(a);
+    const timeB = getTimestamp(b);
+    if (timeA !== timeB) {
+      return timeB - timeA;
     }
-    if (dateA) return -1;
-    if (dateB) return 1;
-    return (b.id || '').localeCompare(a.id || '');
+    const idA = String(a?.id || '');
+    const idB = String(b?.id || '');
+    return idB.localeCompare(idA);
   };
 
   unknownAccounts.sort(sortByNewest);
@@ -351,4 +357,87 @@ export function reviewBadgeCount(items) {
   }
 
   return 0;
+}
+
+/**
+ * Runs all review view-model functions over an array of review items inside try/catch.
+ * Used for diagnostics self-testing.
+ * Never prints message bodies or addresses.
+ *
+ * @param {Array<object>} items - Review items to test
+ * @param {object} [ctx]
+ * @param {Array<object>|object} [ctx.accounts] - Accounts list
+ * @param {object} [ctx.expenses] - Expenses map
+ * @returns {{
+ *   okCount: number,
+ *   failCount: number,
+ *   failingTypes: string[],
+ *   errorMessages: string[]
+ * }}
+ */
+export function runReviewItemsSelfTest(items = [], { accounts = [], expenses = {} } = {}) {
+  let okCount = 0;
+  let failCount = 0;
+  const failingTypes = new Set();
+  const errorMessages = [];
+
+  // 1. Grouping test
+  try {
+    groupReviewItems(items);
+  } catch (err) {
+    failCount++;
+    failingTypes.add('groupReviewItems');
+    if (errorMessages.length < 5) {
+      errorMessages.push(`groupReviewItems failed: ${err.message}`);
+    }
+  }
+
+  // 2. Individual item tests
+  for (const item of (items || [])) {
+    const itemType = item?.type || item?.payload?.type || 'unknown';
+    let itemHasError = false;
+
+    try {
+      describeUnknownAccount(item, 1, accounts);
+    } catch (err) {
+      itemHasError = true;
+      failingTypes.add(itemType);
+      if (errorMessages.length < 5) {
+        errorMessages.push(`describeUnknownAccount [${itemType}]: ${err.message}`);
+      }
+    }
+
+    try {
+      describeDuplicate(item, expenses);
+    } catch (err) {
+      itemHasError = true;
+      failingTypes.add(itemType);
+      if (errorMessages.length < 5) {
+        errorMessages.push(`describeDuplicate [${itemType}]: ${err.message}`);
+      }
+    }
+
+    try {
+      describeUnparsed(item);
+    } catch (err) {
+      itemHasError = true;
+      failingTypes.add(itemType);
+      if (errorMessages.length < 5) {
+        errorMessages.push(`describeUnparsed [${itemType}]: ${err.message}`);
+      }
+    }
+
+    if (itemHasError) {
+      failCount++;
+    } else {
+      okCount++;
+    }
+  }
+
+  return {
+    okCount,
+    failCount,
+    failingTypes: Array.from(failingTypes),
+    errorMessages: errorMessages.slice(0, 5),
+  };
 }

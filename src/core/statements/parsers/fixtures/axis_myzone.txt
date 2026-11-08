@@ -1,0 +1,22 @@
+MY ZONE CREDIT CARD STATEMENT
+TEST OWNER
+1 TEST ROAD
+TEST CITY
+PAYMENT SUMMARY
+Total Payment Due   Minimum Payment Due   Statement Period   Payment Due Date   Statement Generation Date
+1,261.74   Dr   100.00   Dr ⇥  17/09/2026 - 15/10/2026   04/11/2026   15/10/2026
+Credit Card Number   Credit Limit   Available Credit Limit   Available Cash Limit   For hassle free payments register for
+400000******4230   240,000.00   237,950.00   0.00 ⇥ Auto-Debit facility on 1800000000
+Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due ⇥  Making only the minimum payment every
+month would result in the repayment stretching
+2,400.63 Dr   2,400.63   0.00   1,261.74   0.00   0.00   1,261.74   Dr ⇥ over years with consequent interest payment
+Account Summary
+DATE   TRANSACTION DETAILS   MERCHANT CATEGORY   AMOUNT (Rs.)
+Card No:   400000******4230   Name   TEST OWNER
+03/10/2026   DISTRICT MOVIE TICKET,GURUGRAM   ENTERTAINMENT   443.34 Dr
+03/10/2026   DISTRICT MOVIE TICKET,GURUGRAM   ENTERTAINMENT   818.40 Dr
+05/10/2026   PAYMENT RECEIVED   2,400.63 Cr
+**** End of Statement ****
+TERMS AND CONDITIONS
+1. Please check the statement thoroughly.
+2. In case of dispute, contact customer service.

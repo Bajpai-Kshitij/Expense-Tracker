@@ -1,4 +1,9 @@
+import { axisParser } from './axis.js';
+import { iciciParser } from './icici.js';
+
 const registeredParsers = [];
+registerStatementParser(axisParser);
+registerStatementParser(iciciParser);
 
 /**
  * Registers a statement parser implementation.

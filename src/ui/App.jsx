@@ -22,6 +22,8 @@ import SmsImportScreen from './SmsImportScreen.jsx';
 import ReviewScreen from './ReviewScreen.jsx';
 import AccountsScreen from './AccountsScreen.jsx';
 import StatementImport from './StatementImport.jsx';
+import EmiScreen from './EmiScreen.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { scanSms } from '../native/smsScan.js';
 import { readSms } from '../native/expenseNative.js';
@@ -56,8 +58,26 @@ export default function App() {
 
   const [toastMessage, setToastMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [windowError, setWindowError] = useState(null);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [lastSyncIssuesCount, setLastSyncIssuesCount] = useState(0);
+
+  useEffect(() => {
+    const handleErr = (event) => {
+      const msg = event?.message || event?.error?.message || 'An unhandled script error occurred';
+      setWindowError(msg);
+    };
+    const handleRejection = (event) => {
+      const reason = event?.reason?.message || (typeof event?.reason === 'string' ? event.reason : 'Unhandled Promise Rejection');
+      setWindowError(reason);
+    };
+    window.addEventListener('error', handleErr);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleErr);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, []);
 
   const isSyncingRef = useRef(false);
   const isScanningRef = useRef(false);
@@ -418,7 +438,8 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <ErrorBoundary onGoHome={() => setActiveTab('home')}>
+      <div className="app-shell">
       {/* Top Header */}
       <header className="app-header">
         <div className="app-title-group">
@@ -446,8 +467,17 @@ export default function App() {
         </div>
       )}
 
+      {/* Dismissible Window Error Banner */}
+      {windowError && (
+        <div className="alert-banner alert-danger" style={{ margin: '8px 16px 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{windowError}</span>
+          <button type="button" className="alert-close" onClick={() => setWindowError(null)}>✕</button>
+        </div>
+      )}
+
       {/* Tab Content */}
       <main className="app-content">
+        <ErrorBoundary onGoHome={() => setActiveTab('home')}>
         {activeTab === 'home' && (
           <HomeTab
             db={db}
@@ -517,6 +547,10 @@ export default function App() {
             lastSyncTime={lastSyncTime}
             lastSyncIssuesCount={lastSyncIssuesCount}
             openReviewCount={openReviewCount}
+            categories={categories}
+            writer={runtime?.writer}
+            db={db}
+            runtime={runtime}
             onSyncNow={handleManualSync}
             onRebuildFromLogs={handleRebuildFromLogs}
             onChangeFolder={() => setAppState('onboarding')}
@@ -526,6 +560,11 @@ export default function App() {
             onNavigateToStatementImport={() => setActiveTab('statement_import')}
             onNavigateToAccounts={() => setActiveTab('accounts')}
             onNavigateToReview={() => setActiveTab('review')}
+            onNavigateToEmi={() => setActiveTab('emi')}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
           />
         )}
 
@@ -621,6 +660,15 @@ export default function App() {
             }}
           />
         )}
+
+        {activeTab === 'emi' && (
+          <EmiScreen
+            db={db}
+            onBack={() => setActiveTab('settings')}
+            showToast={showToast}
+          />
+        )}
+        </ErrorBoundary>
       </main>
 
       {/* Floating Action Button (FAB) */}
@@ -714,6 +762,7 @@ export default function App() {
           {toastMessage}
         </div>
       )}
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

@@ -241,23 +241,165 @@ describe('src/core/statements - Pure Statement Text Logic', () => {
       }
     });
 
-    it('formatProbeReport respects 12,000 characters limit and truncates middle if needed', () => {
+    it('Rule 1: raises the first-page sample from 25 to 70 lines', () => {
+      const lines = [];
+      for (let i = 1; i <= 85; i++) {
+        lines.push({
+          page: 1,
+          lineNo: i,
+          text: `Arbitrary non-keyword plain line ${i}`,
+        });
+      }
+
+      const sample = pickProbeSample(lines);
+      expect(sample).toHaveLength(70);
+      expect(sample[0].lineNo).toBe(1);
+      expect(sample[69].lineNo).toBe(70);
+      expect(sample.some((l) => l.lineNo === 71)).toBe(false);
+    });
+
+    it('Rule 2: always includes the 12 lines after any line containing "CREDIT SUMMARY", "Total Amount due" or "Previous Balance"', () => {
+      const lines = [];
+      // Page 2 lines beyond line 70
+      for (let i = 1; i <= 100; i++) {
+        let text = `Normal statement line ${i}`;
+        if (i === 10) text = '--- CREDIT SUMMARY ---';
+        if (i === 35) text = 'Total Amount due: 45,000.00';
+        if (i === 60) text = 'Previous Balance: 12,000.00';
+        lines.push({ page: 2, lineNo: i, text });
+      }
+
+      const sample = pickProbeSample(lines);
+      const sampleTexts = new Set(sample.map((l) => l.text));
+
+      // Check CREDIT SUMMARY and 12 lines after it (lines 11-22)
+      expect(sampleTexts.has('--- CREDIT SUMMARY ---')).toBe(true);
+      for (let i = 11; i <= 22; i++) {
+        expect(sampleTexts.has(`Normal statement line ${i}`)).toBe(true);
+      }
+
+      // Check Total Amount due and 12 lines after it (lines 36-47)
+      expect(sampleTexts.has('Total Amount due: 45,000.00')).toBe(true);
+      for (let i = 36; i <= 47; i++) {
+        expect(sampleTexts.has(`Normal statement line ${i}`)).toBe(true);
+      }
+
+      // Check Previous Balance and 12 lines after it (lines 61-72)
+      expect(sampleTexts.has('Previous Balance: 12,000.00')).toBe(true);
+      for (let i = 61; i <= 72; i++) {
+        expect(sampleTexts.has(`Normal statement line ${i}`)).toBe(true);
+      }
+
+      // Check line 25 (not in 12 lines after) is not included
+      expect(sampleTexts.has('Normal statement line 25')).toBe(false);
+    });
+
+    it('Rule 3: when issuer guess is icici, includes every line with Amortization, EMI, DCC, IGST, Autodebit and 6 lines after EMI / PERSONAL LOAN', () => {
+      const lines = [];
+      // Put on page 2 so not selected by first 70 lines rule
+      for (let i = 1; i <= 80; i++) {
+        let text = `Regular line ${i}`;
+        if (i === 5) text = 'Amortization details for loan';
+        if (i === 15) text = 'Monthly EMI converted';
+        if (i === 25) text = 'DCC cross-currency markup';
+        if (i === 35) text = 'IGST levied at 18%';
+        if (i === 45) text = 'Autodebit scheduled on due date';
+        if (i === 60) text = 'EMI / PERSONAL LOAN SCHEDULE';
+        lines.push({ page: 2, lineNo: i, text });
+      }
+
+      // When issuerGuess is icici
+      const iciciSummary = { issuerGuess: 'icici' };
+      const iciciSample = pickProbeSample(lines, iciciSummary);
+      const iciciTexts = new Set(iciciSample.map((l) => l.text));
+
+      expect(iciciTexts.has('Amortization details for loan')).toBe(true);
+      expect(iciciTexts.has('Monthly EMI converted')).toBe(true);
+      expect(iciciTexts.has('DCC cross-currency markup')).toBe(true);
+      expect(iciciTexts.has('IGST levied at 18%')).toBe(true);
+      expect(iciciTexts.has('Autodebit scheduled on due date')).toBe(true);
+      expect(iciciTexts.has('EMI / PERSONAL LOAN SCHEDULE')).toBe(true);
+
+      // 6 lines after EMI / PERSONAL LOAN (lines 61 to 66)
+      for (let i = 61; i <= 66; i++) {
+        expect(iciciTexts.has(`Regular line ${i}`)).toBe(true);
+      }
+      // Line 67 is after the 6 lines and should not be selected
+      expect(iciciTexts.has('Regular line 67')).toBe(false);
+
+      // When issuerGuess is axis, ICICI-specific keywords and follow lines are not included
+      const axisSummary = { issuerGuess: 'axis' };
+      const axisSample = pickProbeSample(lines, axisSummary);
+      const axisTexts = new Set(axisSample.map((l) => l.text));
+
+      expect(axisTexts.has('Amortization details for loan')).toBe(false);
+      expect(axisTexts.has('DCC cross-currency markup')).toBe(false);
+      expect(axisTexts.has('IGST levied at 18%')).toBe(false);
+      expect(axisTexts.has('Autodebit scheduled on due date')).toBe(false);
+      expect(axisTexts.has('Regular line 61')).toBe(false);
+    });
+
+    it('Rule 4: raises report limit to 16,000 characters and truncates with 16,000 notice when exceeded', () => {
+      // 1. Report between 12,000 and 16,000 characters is NOT truncated
+      const midLines = [];
+      for (let i = 1; i <= 140; i++) {
+        midLines.push({
+          page: 1,
+          lineNo: i,
+          text: `12/10/2026 ⇥ Regular Transaction Description With Several Details ${i} ⇥ 9,999.99 Dr`,
+        });
+      }
+      const midSummary = summarizeStructure(midLines);
+      const midReport = formatProbeReport(midSummary, midLines);
+      expect(midReport.length).toBeGreaterThan(12000);
+      expect(midReport.length).toBeLessThanOrEqual(16000);
+      expect(midReport).not.toContain('Sample truncated');
+
+      // 2. Report exceeding 16,000 characters is truncated to stay under 16,000
       const longLines = [];
-      for (let i = 1; i <= 300; i++) {
+      for (let i = 1; i <= 400; i++) {
         longLines.push({
           page: 1,
           lineNo: i,
-          text: `12/10/2026 ⇥ Long Transaction Description Here With Lots Of Words And Details ⇥ 9,999.99 Dr`,
+          text: `12/10/2026 ⇥ Long Transaction Description Here With Lots Of Words And Details ${i} ⇥ 9,999.99 Dr`,
         });
       }
 
       const summary = summarizeStructure(longLines);
       const report = formatProbeReport(summary, longLines);
 
-      expect(report.length).toBeLessThanOrEqual(12000);
+      expect(report.length).toBeLessThanOrEqual(16000);
       expect(report).toContain('=== Statement Structure Summary ===');
       expect(report).toContain('=== Sample Lines ===');
-      expect(report).toContain('Sample truncated to stay under 12,000 characters');
+      expect(report).toContain('Sample truncated to stay under 16,000 characters');
+    });
+
+    it('Masking rules: amounts remain masked at level layout in probe sampling and report workflow', () => {
+      const rawLines = [
+        { page: 1, lineNo: 1, text: 'ICICI Bank Credit Card Statement' },
+        { page: 1, lineNo: 2, text: 'Cardholder: Kshitij Bajpai' },
+        { page: 1, lineNo: 3, text: 'Total Amount due: 45,678.50' },
+        { page: 1, lineNo: 4, text: '12/10/2026 ⇥ SWIGGY BANGALORE ⇥ 1,234.56 Dr' },
+        { page: 1, lineNo: 5, text: '15/10/2026 ⇥ REFUND OF ITEM ⇥ 500.00 Cr' },
+      ];
+
+      const maskedLines = maskStatementText(rawLines, {
+        ownerNames: ['Kshitij Bajpai'],
+        level: 'layout',
+      });
+
+      const summary = summarizeStructure(maskedLines);
+      const sample = pickProbeSample(maskedLines, summary);
+      const report = formatProbeReport(summary, sample);
+
+      expect(report).toContain('Cardholder: <NAME>');
+      expect(report).toContain('Total Amount due: 99,999.99');
+      expect(report).toContain('SWIGGY BANGALORE ⇥ 9,999.99 Dr');
+      expect(report).toContain('REFUND OF ITEM ⇥ 999.99 Cr');
+      // Original amounts should NOT appear
+      expect(report).not.toContain('45,678.50');
+      expect(report).not.toContain('1,234.56');
+      expect(report).not.toContain('500.00');
     });
   });
 });

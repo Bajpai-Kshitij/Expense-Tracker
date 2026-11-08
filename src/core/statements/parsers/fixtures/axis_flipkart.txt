@@ -1,0 +1,31 @@
+Flipkart Axis Bank VISA Credit Card Statement
+TEST OWNER
+1 TEST ROAD
+TEST CITY
+PAYMENT SUMMARY
+Total Payment Due   Minimum Payment Due   Statement Period   Payment Due Date   Statement Generation Date
+2,050.00   Dr   100.00   Dr ⇥  17/09/2026 - 15/10/2026   04/11/2026   15/10/2026
+Credit Card Number   Credit Limit   Available Credit Limit   Available Cash Limit   For hassle free payments register for
+400000******3765   240,000.00   237,950.00   0.00 ⇥ Auto-Debit facility on 1800000000
+Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due ⇥  Making only the minimum payment every
+month would result in the repayment stretching
+1,501.00 Dr   1,501.00   361.00   2,411.00   0.00   0.00   2,050.00   Dr ⇥ over years with consequent interest payment
+Account Summary
+DATE   TRANSACTION DETAILS   MERCHANT CATEGORY   AMOUNT (Rs.)   CASHBACK EARNED
+Card No:   400000******3765   Name   TEST OWNER
+24/09/2026   FLIPKART PAYMENTS,GURGAON   MISC STORE   243.00 Dr   12.00 Cr
+29/09/2026   SWIGGY,BENGALURU   RESTAURANTS   216.00 Dr   8.00 Cr
+30/09/2026   SWIGGY PVT LTD FOOD1,BENGALURU   RESTAURANTS   540.00 Dr   21.00 Cr
+05/10/2026   PAYMENT RECEIVED   1,501.00 Cr   0.00 Dr
+06/10/2026   SWIGGY PVT LTD FOOD1,BENGALURU   RESTAURANTS   584.00 Dr   23.00 Cr
+10/10/2026   FLIPKART GROCERY,BANGALORE   DEPT STORES   131.00 Dr   6.00 Cr
+11/10/2026   CASHBACK CREDIT SEP26-FLIPKART:18~POS:4~UBER_PV   49.00 Cr   0.00 Dr
+11/10/2026   SWIGGY,BENGALURU   RESTAURANTS   385.00 Dr   15.00 Cr
+11/10/2026   RAZORPAY PAYMENTS,BENGALURU   RESTAURANTS   312.00 Cr   12.00 Dr
+11/10/2026   SWIGGY,BENGALURU   RESTAURANTS   312.00 Dr   12.00 Cr
+**** End of Statement ****
+TERMS AND CONDITIONS
+1. Please check the statement thoroughly.
+2. In case of dispute, contact customer service.
+3. Interest rates are subject to change.
+4. Goods and services tax applicable on fees.

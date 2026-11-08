@@ -155,10 +155,11 @@ export function planStatementImport({
         date: line.date,
       });
 
-      // Find active SMS payment expense with the same linkId within 3 days
+      // Find active SMS payment expense with the same linkId on the same account within 3 days
       const matchingSmsPayment = Object.values(allExpenses).find((exp) => {
         if (!exp || exp.deleted || exp.status === 'deleted') return false;
         if (exp.source !== 'sms') return false;
+        if (exp.accountId !== accountId) return false;
         if (exp.linkId !== linkId) return false;
         const diffDays = Math.abs((Date.parse(line.date) - Date.parse(exp.date)) / 86400000);
         return diffDays <= 3.0001;
@@ -319,24 +320,63 @@ export function planStatementImport({
       }
 
       // Create statement expense
-      const catResult = categorize(
-        {
-          merchantRaw: line.merchantRaw,
-          note: '',
-          rawText: line.merchantRaw,
-          accountId,
-          direction: line.direction,
-          amountPaise: line.amountPaise,
-        },
-        catCtx
-      );
+      const rawText = line.bankCategory
+        ? `${line.merchantRaw} ${line.bankCategory}`
+        : line.merchantRaw;
+
+      // Type "cashback" becomes kind "income", direction credit, never categorized
+      const isCashback = line.type === 'cashback';
+      const isEmi = line.type === 'emi_interest' || line.type === 'emi_principal' || line.type === 'emi_tax';
+      const catResult = isCashback
+        ? { categoryId: null, brand: null, kind: 'income' }
+        : categorize(
+            {
+              merchantRaw: line.merchantRaw,
+              note: '',
+              rawText,
+              accountId,
+              direction: line.direction,
+              amountPaise: line.amountPaise,
+            },
+            catCtx
+          );
 
       let finalKind = 'spend';
-      if (line.direction === 'credit' && line.type === 'refund') {
+      if (isCashback) {
+        finalKind = 'income';
+      } else if (isEmi) {
+        finalKind = 'fixed';
+      } else if (line.direction === 'credit' && line.type === 'refund') {
         finalKind = 'spend';
       } else if (catResult.kind) {
         finalKind = catResult.kind;
       }
+
+      let finalCategoryId = isCashback ? null : (catResult.categoryId || null);
+      if (isEmi && !finalCategoryId) {
+        finalCategoryId = 'cat_emi';
+      }
+
+      let emiPlanKey = null;
+      if (isEmi) {
+        if (line.plan && line.plan.creationDate && line.plan.total != null && line.plan.loanPaise != null) {
+          emiPlanKey = `emi:${accountId}|${line.plan.creationDate}|${line.plan.total}|${line.plan.loanPaise}`;
+        } else {
+          const emiMerchant = line.emiMerchant || line.merchant || line.merchantRaw || '';
+          const cleanMerchant = emiMerchant.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          emiPlanKey = `emi:${accountId}|${cleanMerchant}|${line.emiTotal ?? ''}`;
+        }
+      }
+
+      const emiPart =
+        line.emiPart ||
+        (line.type === 'emi_principal'
+          ? 'principal'
+          : line.type === 'emi_interest'
+          ? 'interest'
+          : line.type === 'emi_tax'
+          ? 'tax'
+          : null);
 
       const expenseData = {
         expenseId,
@@ -345,8 +385,8 @@ export function planStatementImport({
         direction: line.direction,
         kind: finalKind,
         merchantRaw: line.merchantRaw,
-        brand: catResult.brand || null,
-        categoryId: catResult.categoryId || null,
+        brand: isCashback ? null : (catResult.brand || null),
+        categoryId: finalCategoryId,
         categoryLocked: false,
         accountId,
         mode: 'card',
@@ -356,6 +396,14 @@ export function planStatementImport({
         statementKey: lineKey,
         statementFileHash: fileHash,
         note: '',
+        emiPlanKey: emiPlanKey || line.emiPlanKey || null,
+        emiNo: line.emiNo ?? null,
+        emiTotal: line.emiTotal ?? null,
+        emiPart,
+        emiMonthlyPaise: line.emiMonthlyPaise ?? (line.plan?.monthlyPaise ?? null),
+        emiFinishDate: line.emiFinishDate ?? (line.plan?.finishDate ?? null),
+        emiOutstandingPaise: line.emiOutstandingPaise ?? (line.plan?.outstandingPaise ?? null),
+        bankCategory: line.bankCategory || null,
       };
 
       events.push({
@@ -378,6 +426,51 @@ export function planStatementImport({
         key: lineKey,
         expenseId,
       });
+    }
+  }
+
+  // Pass 2: Refund linking inside the statement plan
+  // A refund (credit) links to a debit of the same account, the same amount, within 14 days,
+  // when EXACTLY ONE such debit exists in the same import or in existing expenses; set refundOf.
+  for (const pl of plannedLines) {
+    if (
+      pl.line?.type === 'refund' ||
+      (pl.line?.direction === 'credit' && pl.line?.type !== 'payment' && pl.line?.type !== 'cashback')
+    ) {
+      const refundExpId = pl.expenseId;
+      const refundExp = allExpenses[refundExpId];
+      if (!refundExp) continue;
+
+      const refundDateMs = Date.parse(refundExp.date);
+      const candidates = Object.values(allExpenses).filter((exp) => {
+        if (!exp || exp.deleted || exp.status === 'deleted') return false;
+        if (exp.id === refundExpId) return false;
+        if (exp.accountId !== accountId) return false;
+        if (exp.direction !== 'debit') return false;
+        if (exp.amountPaise !== refundExp.amountPaise) return false;
+        const diffDays = Math.abs((Date.parse(exp.date) - refundDateMs) / 86400000);
+        return diffDays <= 14.0001;
+      });
+
+      if (candidates.length === 1) {
+        const linkedDebitId = candidates[0].id;
+        refundExp.refundOf = linkedDebitId;
+
+        const createdEv = events.find(
+          (e) => e.type === 'expense.created' && e.data?.expenseId === refundExpId
+        );
+        if (createdEv) {
+          createdEv.data.refundOf = linkedDebitId;
+        } else {
+          const updatedEv = events.find(
+            (e) => e.type === 'expense.updated' && e.data?.expenseId === refundExpId
+          );
+          if (updatedEv) {
+            updatedEv.data.patch = updatedEv.data.patch || {};
+            updatedEv.data.patch.refundOf = linkedDebitId;
+          }
+        }
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import { totals, totalsByCategory, listExpenses, uncategorizedInbox } from '../c
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { formatPaise } from '../core/format/money.js';
 import { getThisMonthRange, formatDateDisplay } from '../core/format/dates.js';
+import { categoryLabel } from '../core/health/categories.js';
 
 export default function HomeTab({
   db,
@@ -45,7 +46,7 @@ export default function HomeTab({
 
       const chartItems = top6.map((c) => ({
         id: c.categoryId || 'uncategorized',
-        name: c.name || categoriesMap[c.categoryId]?.name || 'Uncategorized',
+        name: categoryLabel(c.categoryId, categoriesMap),
         color: categoriesMap[c.categoryId]?.color || '#94a3b8',
         spendPaise: c.spendPaise,
       }));
@@ -228,7 +229,7 @@ export default function HomeTab({
         ) : (
           <div>
             {recentExpenses.map((exp) => {
-              const catName = categoriesMap[exp.category_id]?.name || 'Uncategorized';
+              const catName = categoryLabel(exp.category_id, categoriesMap);
               const accName = accountsMap[exp.account_id]?.name || '';
               const isCredit = exp.direction === 'credit';
 

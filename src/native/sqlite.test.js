@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import initSqlJs from 'sql.js';
 import { createSqliteAdapterFromDb, clearSqliteAdapterCache } from './sqlite.js';
-import { migrate } from '../core/db/migrations.js';
+import { migrate, MIGRATIONS } from '../core/db/migrations.js';
 
 /**
  * Creates a mock DB connection behaving like @capacitor-community/sqlite:
@@ -154,11 +154,11 @@ describe('Capacitor SQLite Adapter with mocked native plugin', () => {
     const adapter = createSqliteAdapterFromDb(mockDb, 'test_migrations');
 
     const version = await migrate(adapter);
-    expect(version).toBe(2);
+    expect(version).toBe(MIGRATIONS.length);
 
     // Verify schema_version table exists and has rows for migrations
     const rows = await adapter.query('SELECT version FROM schema_version ORDER BY version ASC;');
-    expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(rows).toEqual(MIGRATIONS.map((m) => ({ version: m.version })));
 
     // Verify expenses table was created
     const expensesRows = await adapter.query('SELECT * FROM expenses;');

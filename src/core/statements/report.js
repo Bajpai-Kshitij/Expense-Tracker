@@ -5,7 +5,7 @@
  * - Plain-text report
  * - Summary as short key: value lines
  * - Sample lines with page:line prefix and visible tab markers (" ⇥ ")
- * - Strictly under 12,000 characters (truncates middle of sample if needed and notes it)
+ * - Strictly under 16,000 characters (truncates middle of sample if needed and notes it)
  */
 
 export function formatProbeReport(summary = {}, sampleLines = []) {
@@ -45,13 +45,13 @@ export function formatProbeReport(summary = {}, sampleLines = []) {
 
   const fullReport = summarySection + '\n' + formattedSampleLines.join('\n');
 
-  const MAX_CHARS = 12000;
+  const MAX_CHARS = 16000;
   if (fullReport.length <= MAX_CHARS) {
     return fullReport;
   }
 
   // Truncate the middle of the sample lines to fit under MAX_CHARS
-  const notice = '\n... [Sample truncated to stay under 12,000 characters] ...\n';
+  const notice = '\n... [Sample truncated to stay under 16,000 characters] ...\n';
   const availableChars = MAX_CHARS - summarySection.length - notice.length - 10;
 
   if (availableChars <= 0 || formattedSampleLines.length <= 2) {
@@ -75,4 +75,3 @@ export function formatProbeReport(summary = {}, sampleLines = []) {
   // Fallback safe slice
   return (summarySection + '\n' + formattedSampleLines.slice(0, 5).join('\n') + notice).slice(0, MAX_CHARS);
 }
-

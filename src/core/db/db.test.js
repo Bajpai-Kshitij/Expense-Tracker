@@ -62,9 +62,9 @@ describe('PHASE P2 - SQLite Read Model', () => {
         VALUES ('exp_v1', 5000, '2026-11-01', 'debit', 'spend');
       `);
 
-      // Run migrate to upgrade to v2
+      // Run migrate to upgrade to latest
       const finalVer = await migrate(db);
-      expect(finalVer).toBe(2);
+      expect(finalVer).toBe(MIGRATIONS.length);
 
       // Verify v2 columns and table exist
       const tableInfo = await db.query('PRAGMA table_info(expenses);');
