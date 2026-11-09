@@ -19,92 +19,91 @@ export function clearSqliteAdapterCache() {
 
 /**
  * Wraps an SQLiteDBConnection (or compatible mock) into our database adapter.
- * Manages transactions with depth counting, ensuring single ownership and no duplicate BEGINs.
- * 
+ * There is one connection, so top-level operations run one at a time: a transaction is
+ * exclusive, and anything else waits for it instead of joining it or reading half its work.
+ * Inside a transaction, use the handle passed to the callback.
+ *
  * @param {object} db - SQLite database connection.
  * @param {string} [databaseName='expense_tracker']
  * @param {object} [sqlite=null] - SQLiteConnection manager instance (optional, for close).
  * @returns {object} Database adapter { exec, query, transaction, close }.
  */
 export function createSqliteAdapterFromDb(db, databaseName = 'expense_tracker', sqlite = null) {
-  let transactionDepth = 0;
+  let queue = Promise.resolve();
 
-  const adapter = {
-    async exec(sql, params = []) {
-      const inTx = transactionDepth > 0;
-      if (params && params.length > 0) {
-        if (inTx) {
-          await db.run(sql, params, false);
-        } else {
-          await db.run(sql, params);
-        }
+  function enqueue(op) {
+    const run = queue.then(op, op);
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function runExec(sql, params, inTx) {
+    if (params && params.length > 0) {
+      if (inTx) {
+        await db.run(sql, params, false);
       } else {
-        if (inTx) {
-          await db.execute(sql, false);
-        } else {
-          await db.execute(sql);
-        }
+        await db.run(sql, params);
       }
-    },
+    } else if (inTx) {
+      await db.execute(sql, false);
+    } else {
+      await db.execute(sql);
+    }
+  }
 
-    async query(sql, params = []) {
-      const inTx = transactionDepth > 0;
-      const res = inTx
-        ? await db.query(sql, params || [], false)
-        : await db.query(sql, params || []);
-      return (res && res.values) || [];
-    },
+  async function runQuery(sql, params, inTx) {
+    const res = inTx ? await db.query(sql, params || [], false) : await db.query(sql, params || []);
+    return (res && res.values) || [];
+  }
 
-    async transaction(fn) {
-      const isOuter = transactionDepth === 0;
+  const txHandle = {
+    exec: (sql, params = []) => runExec(sql, params, true),
+    query: (sql, params = []) => runQuery(sql, params, true),
+    transaction: (fn) => fn(txHandle),
+  };
 
-      if (isOuter) {
-        // If a transaction is already active from a failed earlier run, roll it back before starting a new one.
-        if (typeof db.isTransactionActive === 'function') {
-          try {
-            const active = await db.isTransactionActive();
-            if (active && active.result) {
-              await db.rollbackTransaction();
-            }
-          } catch (e) {
-            // Ignore rollback error on stale transaction cleanup
-          }
-        }
-        await db.beginTransaction();
-      }
-
-      transactionDepth++;
-
+  async function runTransaction(fn) {
+    // If a transaction is already active from a failed earlier run, roll it back before starting a new one.
+    if (typeof db.isTransactionActive === 'function') {
       try {
-        const result = await fn(adapter);
-        if (isOuter) {
-          await db.commitTransaction();
+        const active = await db.isTransactionActive();
+        if (active && active.result) {
+          await db.rollbackTransaction();
         }
-        return result;
-      } catch (err) {
-        if (isOuter) {
-          try {
-            if (typeof db.isTransactionActive === 'function') {
-              const active = await db.isTransactionActive();
-              if (active && active.result) {
-                await db.rollbackTransaction();
-              }
-            } else {
-              await db.rollbackTransaction();
-            }
-          } catch (e) {
-            // Absorb rollback failure to ensure original error is rethrown
-          }
-        }
-        throw err;
-      } finally {
-        transactionDepth = Math.max(0, transactionDepth - 1);
+      } catch (e) {
+        // Ignore rollback error on stale transaction cleanup
       }
-    },
+    }
+    await db.beginTransaction();
+
+    try {
+      const result = await fn(txHandle);
+      await db.commitTransaction();
+      return result;
+    } catch (err) {
+      try {
+        if (typeof db.isTransactionActive === 'function') {
+          const active = await db.isTransactionActive();
+          if (active && active.result) {
+            await db.rollbackTransaction();
+          }
+        } else {
+          await db.rollbackTransaction();
+        }
+      } catch (e) {
+        // Absorb rollback failure to ensure original error is rethrown
+      }
+      throw err;
+    }
+  }
+
+  return {
+    exec: (sql, params = []) => enqueue(() => runExec(sql, params, false)),
+    query: (sql, params = []) => enqueue(() => runQuery(sql, params, false)),
+    transaction: (fn) => enqueue(() => runTransaction(fn)),
 
     async close() {
       adapterCache.delete(databaseName);
-      transactionDepth = 0;
       try {
         if (typeof db.isTransactionActive === 'function') {
           const active = await db.isTransactionActive();
@@ -130,8 +129,6 @@ export function createSqliteAdapterFromDb(db, databaseName = 'expense_tracker', 
       } catch (e) {}
     },
   };
-
-  return adapter;
 }
 
 /**

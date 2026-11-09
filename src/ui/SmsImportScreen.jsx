@@ -5,7 +5,9 @@ import { listSenders, sanitizeAllowlist } from '../core/ingest/senders.js';
 import { scanSms, mapPermissionError } from '../native/smsScan.js';
 import { scanSummaryLines } from '../core/review/viewModels.js';
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
-import { rowsToState } from '../core/db/index.js';
+import { rowsToState, loadStateFromDb } from '../core/db/index.js';
+import { listIgnoreRules } from '../core/ingest/userIgnore.js';
+import { maskForSharing } from '../core/ingest/mask.js';
 import { settings } from '../core/db/queries.js';
 import { formatDateDisplay } from '../core/format/dates.js';
 import {
@@ -22,6 +24,7 @@ export default function SmsImportScreen({
   showToast = () => {},
   onReloadLookups = () => {},
 }) {
+  const [ignoreRules, setIgnoreRules] = useState([]);
   const [hasPermission, setHasPermission] = useState(null);
   const [permissionError, setPermissionError] = useState('');
 
@@ -145,6 +148,38 @@ export default function SmsImportScreen({
     }
   };
 
+  const loadIgnoreRules = async () => {
+    const { rules } = await loadStateFromDb(db);
+    const list = [];
+    for (const rule of listIgnoreRules(rules)) {
+      let label = rule.merchantName || `${String(rule.issuer || '').toUpperCase()} ${rule.digits || ''}`;
+      if (rule.matchType === 'template') {
+        const rows = rule.sampleHash
+          ? await db.query('SELECT body FROM raw_messages WHERE hash = ? LIMIT 1;', [rule.sampleHash])
+          : [];
+        // The wording stays on the phone that received it; the other phone shows the sender only.
+        label = rows[0]?.body ? maskForSharing(rows[0].body) : `Messages from ${rule.sender || 'a sender'}`;
+      }
+      list.push({ id: rule.id, type: rule.matchType, label });
+    }
+    setIgnoreRules(list);
+  };
+
+  useEffect(() => {
+    if (db) loadIgnoreRules().catch(() => {});
+  }, [db]);
+
+  const handleRemoveIgnoreRule = async (id) => {
+    try {
+      await writer.write('rule.deleted', { id });
+      showToast('Removed. New messages like this will be read again.');
+      await loadIgnoreRules();
+      await onReloadLookups();
+    } catch (err) {
+      showToast(`Failed: ${err.message}`);
+    }
+  };
+
   const handleScanInboxSenders = async () => {
     try {
       setScanningSenders(true);
@@ -261,17 +296,7 @@ export default function SmsImportScreen({
       setScanSummary(null);
       setPermissionError('');
 
-      const getState = async () => {
-        const rows = {
-          expenses: await db.query('SELECT * FROM expenses;'),
-          categories: await db.query('SELECT * FROM categories;'),
-          accounts: await db.query('SELECT * FROM accounts;'),
-          brands: await db.query('SELECT * FROM brands;'),
-          rules: await db.query('SELECT * FROM rules;'),
-          review_queue: await db.query('SELECT * FROM review_queue;'),
-        };
-        return rowsToState(rows);
-      };
+      const getState = () => loadStateFromDb(db);
 
       const res = await scanSms({
         readSms,
@@ -566,6 +591,23 @@ export default function SmsImportScreen({
           💡 Add your wife&apos;s name too (used to recognise self-transfers between household accounts)
         </p>
       </div>
+
+      {/* Ignored SMS */}
+      {ignoreRules.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <div className="card-header">
+            <span className="card-title">Ignored messages ({ignoreRules.length})</span>
+          </div>
+          {ignoreRules.map((r) => (
+            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: '1px solid var(--border-color)' }}>
+              <span style={{ fontSize: '0.8rem', wordBreak: 'break-word' }}>{r.label}</span>
+              <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 8px', flexShrink: 0 }} onClick={() => handleRemoveIgnoreRule(r.id)}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Scan SMS Now Section */}
       <div className="card" style={{ marginBottom: '16px' }}>

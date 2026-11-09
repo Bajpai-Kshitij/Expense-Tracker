@@ -262,6 +262,7 @@ export function describeUnparsed(item) {
 
   return {
     preview,
+    fullMasked: masked,
     receivedAt,
     address,
   };

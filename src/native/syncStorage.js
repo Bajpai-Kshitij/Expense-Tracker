@@ -1,4 +1,4 @@
-import { listFiles, readFile, appendLine, writeFile } from './expenseNative.js';
+import { listFiles, readFile, appendLine, writeFile, deleteFile } from './expenseNative.js';
 
 /**
  * Creates a storage interface adapter bound to a specific SAF folder URI.
@@ -43,6 +43,10 @@ export function createSyncStorage(folderUri) {
 
     async writeFile(name, text) {
       return writeFile({ uri: folderUri, name, text });
+    },
+
+    async deleteFile(name) {
+      return deleteFile({ uri: folderUri, name });
     },
   };
 }

@@ -121,7 +121,7 @@ export default function ReportsTab({
     const map = new Map();
     for (const d of devices) {
       if (d && d.deviceId) {
-        map.set(d.deviceId, d.deviceLabel || d.deviceId);
+        map.set(d.deviceId, d.label || d.deviceLabel || d.deviceId);
       }
     }
     return map;

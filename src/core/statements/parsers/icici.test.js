@@ -197,7 +197,7 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
       expect(l[5]).toMatchObject({ date: '2026-10-07', amountPaise: 15400, type: 'purchase' });
 
       // 6: purchase 963022 (10-10)
-      expect(l[6]).toMatchObject({ date: '2026-10-10', amountPaise: 963022, type: 'purchase' });
+      expect(l[6]).toMatchObject({ date: '2026-10-10', amountPaise: 963022, type: 'emi_conversion' });
 
       // 7: emi_interest 39414 (6/9, merchant "Flipkart")
       expect(l[7]).toMatchObject({ date: '2026-10-11', amountPaise: 39414, type: 'emi_interest', emiNo: 6, emiTotal: 9, emiMerchant: 'Flipkart' });
@@ -209,11 +209,11 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
       expect(l[9]).toMatchObject({ date: '2026-10-11', amountPaise: 724858, type: 'emi_principal', emiNo: 6, emiTotal: 9, emiMerchant: 'Flipkart' });
 
       // 10: refund 963022 credit (10-13, refundOf the 10-10 purchase)
-      expect(l[10]).toMatchObject({ date: '2026-10-13', amountPaise: 963022, direction: 'credit', type: 'refund' });
+      expect(l[10]).toMatchObject({ date: '2026-10-13', amountPaise: 963022, direction: 'credit', type: 'emi_conversion' });
 
       // 11: fee 28794 with tax 5183 (line was converted to fee by tax pairing)
-      expect(l[11]).toMatchObject({ date: '2026-10-13', amountPaise: 28794, type: 'fee' });
-      expect(l[12]).toMatchObject({ date: '2026-10-13', amountPaise: 5183, type: 'tax' });
+      expect(l[11]).toMatchObject({ date: '2026-10-13', amountPaise: 28794, type: 'emi_fee' });
+      expect(l[12]).toMatchObject({ date: '2026-10-13', amountPaise: 5183, type: 'emi_tax' });
 
       // 13: emi_interest 12832 (1/3)
       expect(l[13]).toMatchObject({ date: '2026-10-13', amountPaise: 12832, type: 'emi_interest', emiNo: 1, emiTotal: 3 });
@@ -370,10 +370,10 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
       });
 
       const fixedCreated = plan.events
-        .filter((ev) => ev.type === 'expense.created' && ev.data.kind === 'fixed')
+        .filter((ev) => ev.type === 'expense.created' && ev.data.kind === 'fixed' && ev.data.emiNo != null)
         .map((ev) => ev.data);
 
-      // 3 EMI groups x 3 lines each = 9 fixed lines
+      // 3 EMI groups x 3 lines each = 9 installment lines (the processing fee lines have no emiNo)
       expect(fixedCreated).toHaveLength(9);
 
       // Group 1: Flipkart 6/9
@@ -414,7 +414,7 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
       }
     });
 
-    it('links the 9630.22 refund on 13-10 to the 10-10 purchase within 14 days', () => {
+    it('does not treat the 9630.22 EMI conversion as a refund of its purchase', () => {
       const parsed = parse(iciciLines);
       const plan = planStatementImport({
         result: parsed,
@@ -432,7 +432,7 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
 
       expect(refundCreated).toBeDefined();
       expect(purchaseCreated).toBeDefined();
-      expect(refundCreated.data.refundOf).toBe(purchaseCreated.data.expenseId);
+      expect(refundCreated.data.refundOf).toBeUndefined();
     });
   });
 
@@ -638,7 +638,7 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
   });
 
   describe('9. Net Spend Calculation for October 2026', () => {
-    it('produces 804,702 paise net spend with default filters and 1,907,979 paise with includeFixed', async () => {
+    it('produces 770,725 paise net spend with default filters and 1,907,979 paise with includeFixed', async () => {
       const db = await createSqljsAdapter();
       await migrate(db);
       const storage = createMemoryStorage();
@@ -672,18 +672,18 @@ describe('PHASE P8b-2b-1 - ICICI Credit Card Statement Parser', () => {
       await applyStatementImport({ plan: stmtPlan, writer, db });
 
       // Default totals for October 2026 (excludes fixed and payment):
-      // Debits (purchases + fees): 669.00 + 649.00 + 12.92 + 2.33 + 154.00 + 9630.22 + 287.94 + 51.83 + 1873.00 + 504.00 + 380.00 + 2735.00 + 274.00 + 454.00 = 17677.24
-      // Minus refund: -9630.22
-      // Net spend = 8,047.02 (804,702 paise)
+      // Handover section 8: the EMI conversion is two transfers and the EMI processing fee is Fixed.
+      // Spend: 669.00 + 649.00 + 12.92 + 2.33 + 154.00 + 1873.00 + 504.00 + 380.00 + 2735.00 + 274.00 + 454.00
+      // Net spend = 7,707.25 (770,725 paise)
       const defaultTotals = await totals(db, {
         from: '2026-10-01',
         to: '2026-10-31',
         includeFixed: false,
       });
-      expect(defaultTotals.netPaise).toBe(804702);
+      expect(defaultTotals.netPaise).toBe(770725);
 
-      // With includeFixed: adds October EMI lines (Flipkart 7713.67 + Amazon Pay 3319.10 = 11032.77)
-      // 804,702 + 1,103,277 = 1,907,979 paise (₹19,079.79)
+      // With includeFixed: adds October EMI lines (11032.77) and the processing fee with GST (339.77)
+      // 770,725 + 1,137,254 = 1,907,979 paise (₹19,079.79), the same total as before
       const fixedTotals = await totals(db, {
         from: '2026-10-01',
         to: '2026-10-31',

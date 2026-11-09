@@ -54,6 +54,23 @@ export function isFieldUpdateWinning(existingMeta, newMeta) {
 }
 
 /**
+ * Applies an upsert only if it beats what is stored, so the result does not depend on arrival
+ * order. A seed never beats a user's edit, whatever its timestamp.
+ */
+function applyUpsert(collection, id, data, event) {
+  const { seed, ...fields } = data;
+  const incoming = { ts: event.ts, dev: event.dev, seq: event.seq, seed: Boolean(seed) };
+  const current = collection[id]?._lww;
+  if (current) {
+    const sameInstant = Date.parse(current.ts) === Date.parse(incoming.ts) && current.dev === incoming.dev;
+    let wins = sameInstant ? incoming.seq > current.seq : isFieldUpdateWinning(current, incoming);
+    if (current.seed !== incoming.seed) wins = current.seed;
+    if (!wins) return;
+  }
+  collection[id] = { ...fields, _lww: incoming };
+}
+
+/**
  * Internal single-event application handler.
  * Returns { status: 'applied' | 'parked' | 'skipped' }.
  */
@@ -241,7 +258,7 @@ function applySingleEvent(event, state) {
     case 'category.upserted': {
       const id = data.categoryId || data.id;
       if (id) {
-        state.categories[id] = { ...data };
+        applyUpsert(state.categories, id, data, event);
       }
       return { status: 'applied' };
     }
@@ -249,7 +266,7 @@ function applySingleEvent(event, state) {
     case 'brand.upserted': {
       const id = data.brandId || data.id || data.name;
       if (id) {
-        state.brands[id] = { ...data };
+        applyUpsert(state.brands, id, data, event);
       }
       return { status: 'applied' };
     }
@@ -257,7 +274,7 @@ function applySingleEvent(event, state) {
     case 'account.upserted': {
       const id = data.accountId || data.id;
       if (id) {
-        state.accounts[id] = { ...data };
+        applyUpsert(state.accounts, id, data, event);
       }
       return { status: 'applied' };
     }
@@ -265,7 +282,7 @@ function applySingleEvent(event, state) {
     case 'rule.upserted': {
       const id = data.ruleId || data.id;
       if (id) {
-        state.rules[id] = { ...data };
+        applyUpsert(state.rules, id, data, event);
       }
       return { status: 'applied' };
     }
@@ -273,7 +290,8 @@ function applySingleEvent(event, state) {
     case 'rule.deleted': {
       const id = data.ruleId || data.id;
       if (id) {
-        delete state.rules[id];
+        // Kept as an inactive tombstone so a late, older edit cannot bring the rule back.
+        applyUpsert(state.rules, id, { id, active: false, _deleted: true }, event);
       }
       return { status: 'applied' };
     }

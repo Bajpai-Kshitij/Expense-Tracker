@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { expenseTitle } from '../core/payees/payees.js';
 import { listExpenses, totals } from '../core/db/queries.js';
 import { normalizeFilters } from '../core/forms/filters.js';
+import { jointAccountIds } from '../core/sync/device.js';
 import { formatPaise } from '../core/format/money.js';
 import { formatDateDisplay } from '../core/format/dates.js';
 import { categoryLabel } from '../core/health/categories.js';
@@ -68,6 +70,7 @@ export default function ExpensesTab({
     try {
       if (isInitial) setLoading(true);
       const normalized = normalizeFilters({
+        excludeAccountIds: jointAccountIds(accounts),
         ...filterState,
         includeFixed: filterState.typeFilter === 'spend_fixed' || filterState.typeFilter === 'fixed' || filterState.typeFilter === 'all',
       });
@@ -322,7 +325,7 @@ export default function ExpensesTab({
                 >
                   <div className="expense-left">
                     <div className="expense-title">
-                      {exp.merchant_raw || exp.note || 'Expense'}
+                      {expenseTitle(exp)}
                     </div>
                     <div className="expense-meta">
                       <span>{catName}</span>

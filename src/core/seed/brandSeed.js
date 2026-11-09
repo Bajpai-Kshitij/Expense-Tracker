@@ -145,14 +145,14 @@ export async function seedBrandsIfEmpty({ writer, state, settings, db } = {}) {
   // Add missing starter brands
   for (const b of STARTER_BRANDS) {
     if (!existingBrandIds.has(b.id)) {
-      await writer.write('brand.upserted', b);
+      await writer.write('brand.upserted', { ...b, seed: true });
       writtenCount++;
     }
   }
 
   // Add missing sample rule
   if (!existingRuleIds.has(SAMPLE_RULE.id)) {
-    await writer.write('rule.upserted', SAMPLE_RULE);
+    await writer.write('rule.upserted', { ...SAMPLE_RULE, seed: true });
     writtenCount++;
   }
 

@@ -147,6 +147,19 @@ export function parseTimeToken(text) {
   return `${hh}:${mm}:${ss}`;
 }
 
+/** Parses a 12-hour time such as "09:15 PM" or "09:15:00 PM" into HH:MM:SS. */
+export function parseTime12Token(text) {
+  const m = String(text || '').trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)$/i);
+  if (!m) return null;
+  const hour = (Number(m[1]) % 12) + (/pm/i.test(m[4]) ? 12 : 0);
+  return parseTimeToken(`${hour}:${m[2]}:${m[3] || '00'}`);
+}
+
+/** YYYY-MM-DD in IST for an epoch timestamp, for messages that give no date of their own. */
+export function istDateFromMs(ms) {
+  return new Date(ms + 19800000).toISOString().slice(0, 10);
+}
+
 /**
  * Converts date and time strings into ISO-8601 timestamp with +05:30 IST offset.
  * 

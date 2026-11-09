@@ -334,9 +334,7 @@ input, select, textarea, button {
 .expense-title {
   font-size: 0.95rem;
   font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .expense-meta {
@@ -480,6 +478,7 @@ input, select, textarea, button {
   max-width: 600px;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   max-height: 90vh;
+  max-height: 90dvh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
@@ -489,6 +488,7 @@ input, select, textarea, button {
   .modal-sheet {
     border-radius: var(--radius-lg);
     max-height: 85vh;
+    max-height: 85dvh;
   }
 }
 
@@ -505,10 +505,18 @@ input, select, textarea, button {
   font-weight: 700;
 }
 
+.modal-sheet > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .modal-body {
   padding: 16px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .modal-footer {

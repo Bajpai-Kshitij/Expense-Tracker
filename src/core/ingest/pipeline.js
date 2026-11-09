@@ -1,3 +1,5 @@
+import { listReviewItems } from '../db/reviewQueue.js';
+import { matchUserIgnore } from './userIgnore.js';
 import { parseSms } from './index.js';
 import { sha256Hex } from './registry.js';
 import { expenseIdFromDedupeKey } from '../events/id.js';
@@ -126,6 +128,18 @@ export function planImport({
       continue;
     }
 
+    if (matchUserIgnore({ body: msg.body, status, txn, rules: ctx?.rules })) {
+      summary.ignored += 1;
+      rawRows.push({
+        hash: rawHash,
+        kind: 'ignored',
+        body: msg.body,
+        received_at: msg.date,
+        parsed: JSON.stringify({ status: 'ignored', reason: 'user_rule', address: msg.address, date: msg.date }),
+      });
+      continue;
+    }
+
     if (status === 'unparsed') {
       summary.unparsed += 1;
       rawRows.push({
@@ -190,6 +204,7 @@ export function planImport({
             issuer: txn?.accountHint?.issuer,
             digits: txn?.accountHint?.digits,
             product: txn?.accountHint?.product,
+            accountType: txn?.accountHint?.accountType,
             stableKey,
           },
           status: 'open',
@@ -458,6 +473,37 @@ export async function applyImport({ plan, writer, db }) {
       }
     });
   }
+}
+
+/**
+ * Re-reads open "unparsed" review items, so messages scanned before their layout was supported
+ * are imported. A rescan cannot do this because their hashes are already stored. Items the user
+ * dismissed are not open, so they stay rejected.
+ *
+ * @returns {Promise<object>} { created, byKind }
+ */
+export async function reprocessOpenUnparsed({ db, writer, state = {}, ownerNames = [] }) {
+  const ctx = { accounts: state.accounts || {}, brands: state.brands || {}, rules: state.rules || {}, ownerNames };
+  const parseCtx = { ...ctx, accounts: Object.values(ctx.accounts) };
+
+  const nowReadable = (await listReviewItems(db, 'unparsed')).filter((item) => {
+    const { body, address, date } = item.payload || {};
+    return body && parseSms({ address, body, date }, parseCtx).status !== 'unparsed';
+  });
+  if (nowReadable.length === 0) return { created: 0, byKind: {} };
+
+  const messages = nowReadable.map(({ payload: p }) => ({ address: p.address, body: p.body, date: p.date }));
+  const plan = planImport({ messages, ctx, state, seenHashes: new Set() });
+  await applyImport({ plan, writer, db });
+
+  for (const row of plan.rawRows) {
+    await db.exec('UPDATE raw_messages SET kind = ?, parsed = ? WHERE hash = ?;', [row.kind, row.parsed, row.hash]);
+  }
+  await writer.writeMany(nowReadable.map((item) => ({ type: 'review.resolved', data: { reviewId: item.id, decision: 'parsed_later' } })));
+  for (const item of nowReadable) {
+    await db.exec('UPDATE review_queue SET status = ? WHERE id = ?;', ['resolved', item.id]);
+  }
+  return { created: plan.summary.created, byKind: plan.summary.byKind };
 }
 
 /**

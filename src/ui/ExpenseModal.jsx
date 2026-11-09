@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { validateExpenseForm, buildCreateData, buildPatch } from '../core/forms/expenseForm.js';
 import { getTodayIst } from '../core/format/dates.js';
+import { getExpenseExtras } from '../core/db/index.js';
+import { buildMerchantIgnoreRule } from '../core/ingest/userIgnore.js';
+import { buildPayeeBrand, extractUpiId, planPayeeRename } from '../core/payees/payees.js';
 
 export default function ExpenseModal({
   expense = null, // if present, edit mode; if null, add mode
@@ -10,12 +13,32 @@ export default function ExpenseModal({
   brands = [],
   rules = [],
   writer,
+  db,
   deviceId,
   onClose,
   onSuccess,
 }) {
   const isEdit = Boolean(expense);
   const isSmsImported = isEdit && expense?.source === 'sms';
+  const isStatement = isEdit && expense?.source === 'statement';
+  const rawHash = isEdit ? getExpenseExtras(expense).rawHash : null;
+  const [originalSms, setOriginalSms] = useState(initialValues?.sourceText || null);
+  const [payeeName, setPayeeName] = useState(expense?.brand || '');
+  const merchantRaw = expense?.merchant_raw || '';
+  const upiId = extractUpiId(merchantRaw);
+
+  useEffect(() => {
+    if (!db || !rawHash) return undefined;
+    let active = true;
+    db.query('SELECT body FROM raw_messages WHERE hash = ? LIMIT 1;', [rawHash])
+      .then((rows) => {
+        if (active) setOriginalSms(rows[0]?.body || null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [db, rawHash]);
 
   const initialAmount = expense && typeof expense.amount_paise === 'number'
     ? (expense.amount_paise / 100).toString()
@@ -101,7 +124,26 @@ export default function ExpenseModal({
       await writer.write('expense.deleted', {
         expenseId: expense.id,
       });
+      if (isSmsImported && merchantRaw && window.confirm(`Also skip future SMS for "${merchantRaw}"?`)) {
+        await writer.write('rule.upserted', buildMerchantIgnoreRule({ merchant: merchantRaw }));
+      }
       onSuccess('Expense deleted');
+    } catch (err) {
+      setErrors({ form: err.message });
+      setIsSaving(false);
+    }
+  };
+
+  const handleSavePayee = async () => {
+    const name = payeeName.trim();
+    if (!name || !merchantRaw || !writer || !db) return;
+    try {
+      setIsSaving(true);
+      await writer.write('brand.upserted', buildPayeeBrand({ merchant: merchantRaw, name }));
+      const rows = await db.query('SELECT * FROM expenses;');
+      const updates = planPayeeRename(rows, merchantRaw, name);
+      if (updates.length > 0) await writer.writeMany(updates);
+      onSuccess(`Saved "${name}" for ${updates.length} ${updates.length === 1 ? 'expense' : 'expenses'}`);
     } catch (err) {
       setErrors({ form: err.message });
       setIsSaving(false);
@@ -126,6 +168,21 @@ export default function ExpenseModal({
               </div>
             )}
 
+            {(originalSms || isSmsImported) && (
+              <div style={{ marginBottom: '12px' }}>
+                <div className="form-label">Original SMS</div>
+                <div style={{ background: 'var(--bg-secondary)', padding: '10px', borderRadius: '6px', fontSize: '0.85rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {originalSms || 'This message is on the other phone, or was removed from this one.'}
+                </div>
+              </div>
+            )}
+
+            {isStatement && !originalSms && (
+              <div style={{ background: 'var(--bg-secondary)', padding: '10px', borderRadius: '6px', fontSize: '0.85rem', marginBottom: '12px', overflowWrap: 'anywhere' }}>
+                From card statement: {merchantRaw}
+              </div>
+            )}
+
             {errors.form && (
               <div className="alert-banner alert-danger">
                 <span>{errors.form}</span>
@@ -138,7 +195,7 @@ export default function ExpenseModal({
               <input
                 type="text"
                 inputMode="decimal"
-                autoFocus
+                autoFocus={!isEdit}
                 className={`form-input ${errors.amount ? 'error' : ''}`}
                 placeholder="e.g. 1,250.50"
                 value={form.amount}
@@ -223,8 +280,8 @@ export default function ExpenseModal({
               </div>
             </div>
 
-            {/* Mode & Merchant */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            {/* Mode */}
+            <div>
               <div className="form-group">
                 <label className="form-label">Payment Mode</label>
                 <select
@@ -240,17 +297,42 @@ export default function ExpenseModal({
                 </select>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Merchant / Payee</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Swiggy, Uber"
-                  value={form.merchant}
-                  onChange={(e) => handleChange('merchant', e.target.value)}
-                />
-              </div>
             </div>
+
+            {/* Merchant gets the full width so long names and UPI ids stay readable */}
+            <div className="form-group">
+              <label className="form-label">Merchant / Payee</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Swiggy, Uber"
+                value={form.merchant}
+                onChange={(e) => handleChange('merchant', e.target.value)}
+              />
+            </div>
+
+            {isEdit && merchantRaw && (
+              <div className="form-group">
+                <label className="form-label">Name this payee (both phones, past and future)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Corner Shop"
+                    value={payeeName}
+                    onChange={(e) => setPayeeName(e.target.value)}
+                  />
+                  <button type="button" className="btn btn-secondary" disabled={isSaving || !payeeName.trim()} onClick={handleSavePayee}>
+                    Save name
+                  </button>
+                </div>
+                {upiId && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px', overflowWrap: 'anywhere' }}>
+                    UPI ID: {upiId}. To see the registered name, enter this ID in any UPI app; it shows the name before you pay.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Note */}
             <div className="form-group">

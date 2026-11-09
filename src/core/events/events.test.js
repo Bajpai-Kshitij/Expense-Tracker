@@ -577,7 +577,8 @@ describe('PHASE P1 - Event Core', () => {
       });
 
       const state2 = applyEvents(state1, [eRuleDelete]);
-      expect(state2.rules['rule_swiggy']).toBeUndefined();
+      // Kept as an inactive tombstone so an older edit arriving late cannot bring it back.
+      expect(state2.rules['rule_swiggy']).toMatchObject({ active: false, _deleted: true });
     });
 
     describe('expense.linked event handling', () => {

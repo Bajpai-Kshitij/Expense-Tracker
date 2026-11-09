@@ -1,3 +1,6 @@
+import { planUndoImport } from './plan.js';
+import { loadStateFromDb } from '../../db/sync.js';
+
 /**
  * Applies a statement import plan with strict transactional ordering:
  * 1) Append events via writer.writeMany (appends to event log and updates read model).
@@ -41,3 +44,16 @@ export async function applyStatementImport({ plan, writer, db }) {
   }
 }
 
+
+/**
+ * Undoes a statement import and forgets the file, so it can be imported into the right account.
+ * @returns {Promise<number>} Expenses deleted.
+ */
+export async function undoStatementImport({ fileHash, writer, db }) {
+  const events = planUndoImport(await loadStateFromDb(db), fileHash);
+  if (events.length > 0) {
+    await writer.writeMany(events);
+  }
+  await db.exec("DELETE FROM raw_messages WHERE hash = ? AND kind = 'pdf_file';", [fileHash]);
+  return events.length;
+}

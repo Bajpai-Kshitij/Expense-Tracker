@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { expenseTitle } from '../core/payees/payees.js';
 import { totals, totalsByCategory, listExpenses, uncategorizedInbox } from '../core/db/queries.js';
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { formatPaise } from '../core/format/money.js';
 import { getThisMonthRange, formatDateDisplay } from '../core/format/dates.js';
 import { categoryLabel } from '../core/health/categories.js';
+import { scopeFilter, jointAccountIds } from '../core/sync/device.js';
 
 export default function HomeTab({
   db,
@@ -17,7 +19,12 @@ export default function HomeTab({
   onNavigateToSmsImport,
   onSelectExpense,
   refreshTick = 0,
+  deviceGroups = null,
 }) {
+  // Each person starts on their own spending; Overall is one tap away.
+  const [scope, setScope] = useState('mine');
+  const scoped = scopeFilter(deviceGroups, scope, jointAccountIds(Object.values(accountsMap)));
+  const scopeKey = `${scoped.createdByDev || 'all'}|${(scoped.excludeAccountIds || []).join(',')}`;
   const [loading, setLoading] = useState(true);
   const [totalData, setTotalData] = useState({ netPaise: 0, spendPaise: 0, count: 0 });
   const [catChartData, setCatChartData] = useState([]);
@@ -32,11 +39,11 @@ export default function HomeTab({
       const { from, to } = getThisMonthRange();
 
       // 1. Net spend this month
-      const tot = await totals(db, { from, to, includeFixed });
+      const tot = await totals(db, { from, to, includeFixed, ...scoped });
       setTotalData(tot);
 
       // 2. Spend by category (top 6 + Other)
-      const catTotals = await totalsByCategory(db, { from, to, includeFixed });
+      const catTotals = await totalsByCategory(db, { from, to, includeFixed, ...scoped });
       const validCats = catTotals.filter((c) => c.spendPaise > 0);
       validCats.sort((a, b) => b.spendPaise - a.spendPaise);
 
@@ -63,7 +70,7 @@ export default function HomeTab({
       setCatChartData(chartItems);
 
       // 3. Uncategorized inbox
-      const uncat = await uncategorizedInbox(db);
+      const uncat = await uncategorizedInbox(db, scoped);
       setUncategorizedCount(uncat.length);
 
       // 4. Open review items count
@@ -71,7 +78,7 @@ export default function HomeTab({
       setOpenReviewCount(openRev);
 
       // 5. Last 5 expenses
-      const recent = await listExpenses(db, { limit: 5 });
+      const recent = await listExpenses(db, { limit: 5, ...scoped });
       setRecentExpenses(recent);
     } catch (err) {
       console.error('Failed to load Home data:', err);
@@ -82,12 +89,33 @@ export default function HomeTab({
 
   useEffect(() => {
     loadData(recentExpenses.length === 0);
-  }, [db, includeFixed, refreshTick]);
+  }, [db, includeFixed, refreshTick, scopeKey]);
 
   const maxCatSpend = catChartData.reduce((max, c) => Math.max(max, c.spendPaise), 1);
 
   return (
     <div>
+      {/* Whose spending */}
+      {deviceGroups?.others?.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', overflowX: 'auto' }}>
+          {[
+            { id: 'mine', label: 'Mine' },
+            ...deviceGroups.others.map((g) => ({ id: g.deviceId, label: g.label })),
+            { id: 'all', label: 'Overall' },
+          ].map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={`btn ${scope === option.id ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: '1 0 auto', fontSize: '0.85rem', padding: '6px 10px', minHeight: '36px' }}
+              onClick={() => setScope(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Month Total Card */}
       <div className="card">
         <div className="card-header">
@@ -157,7 +185,7 @@ export default function HomeTab({
             if (onNavigateToUncategorized) {
               onNavigateToUncategorized();
             } else {
-              onNavigateToExpenses({ uncategorizedOnly: true });
+              onNavigateToExpenses({ uncategorizedOnly: true, ...scoped });
             }
           }}
         >
@@ -214,7 +242,7 @@ export default function HomeTab({
               type="button"
               className="btn btn-secondary"
               style={{ padding: '2px 8px', fontSize: '0.75rem', minHeight: '28px' }}
-              onClick={() => onNavigateToExpenses({})}
+              onClick={() => onNavigateToExpenses({ ...scoped })}
             >
               View All
             </button>
@@ -241,7 +269,7 @@ export default function HomeTab({
                 >
                   <div className="expense-left">
                     <div className="expense-title">
-                      {exp.merchant_raw || exp.note || 'Expense'}
+                      {expenseTitle(exp)}
                     </div>
                     <div className="expense-meta">
                       <span>{catName}</span>

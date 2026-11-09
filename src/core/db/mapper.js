@@ -1,5 +1,39 @@
 import { createEmptyState } from '../events/reducer.js';
 
+// Fields with their own column or never persisted; every other field is kept in expenses.extras.
+const MAPPED_EXPENSE_FIELDS = new Set([
+  'id', 'expenseId', 'deleted', 'deletedAt', 'deletedDev', 'field_ts', 'linkedKeys', 'createdAt', 'createdDev', 'status',
+  'amount_paise', 'amountPaise', 'date', 'txn_ts', 'txnTs', 'direction', 'kind', 'merchant_raw', 'merchantRaw', 'brand',
+  'category_id', 'categoryId', 'category_locked', 'categoryLocked', 'account_id', 'accountId', 'mode', 'source',
+  'ref_no', 'refNo', 'dedupe_key', 'dedupeKey', 'note', 'created_by_dev', 'merged_into', 'mergedInto',
+  'statement_key', 'statementKey', 'statement_file_hash', 'statementFileHash', 'link_id', 'linkId',
+  'emi_plan_key', 'emiPlanKey', 'emi_no', 'emiNo', 'emi_total', 'emiTotal', 'emi_part', 'emiPart',
+  'emi_monthly_paise', 'emiMonthlyPaise', 'emi_finish_date', 'emiFinishDate',
+  'emi_outstanding_paise', 'emiOutstandingPaise', 'bank_category', 'bankCategory',
+]);
+
+function expenseExtras(exp) {
+  const extras = {};
+  for (const key of Object.keys(exp).sort()) {
+    if (!MAPPED_EXPENSE_FIELDS.has(key) && exp[key] !== undefined) extras[key] = exp[key];
+  }
+  return Object.keys(extras).length > 0 ? JSON.stringify(extras) : null;
+}
+
+/**
+ * Parses the extra fields of an expense row (rawHash, refundOf and any future field).
+ * @param {object} row - Row from the expenses table.
+ * @returns {object}
+ */
+export function getExpenseExtras(row) {
+  if (!row?.extras) return {};
+  try {
+    return JSON.parse(row.extras);
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Converts pure reducer state into relational table rows.
  * @param {object} state - Reducer state.
@@ -95,6 +129,7 @@ export function stateToRows(state) {
           : exp.bankCategory !== undefined
           ? exp.bankCategory
           : null,
+      extras: expenseExtras(exp),
     }));
 
   const categories = Object.values(state.categories || {})
@@ -276,6 +311,7 @@ export function rowsToState(rows = {}) {
     if (row.bank_category !== null && row.bank_category !== undefined) {
       exp.bankCategory = row.bank_category;
     }
+    Object.assign(exp, getExpenseExtras(row));
     exp.linkedKeys = new Set();
     if (exp.dedupeKey) exp.linkedKeys.add(exp.dedupeKey);
     if (exp.statementKey) exp.linkedKeys.add(exp.statementKey);
@@ -323,9 +359,11 @@ export function rowsToState(rows = {}) {
   }
 
   for (const row of rows.review_queue || []) {
-    state.reviews[row.id] = row.payload
+    const review = row.payload
       ? JSON.parse(row.payload)
       : { id: row.id, type: row.type, status: row.status };
+    // A local "resolved" exists only in the status column; the payload still says open.
+    state.reviews[row.id] = row.status === 'resolved' ? { ...review, status: 'resolved' } : review;
   }
 
   return state;

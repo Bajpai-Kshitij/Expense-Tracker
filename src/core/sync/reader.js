@@ -59,6 +59,7 @@ export async function readAllEvents({
   syncState,
   db,
   full = false,
+  sinceMs = null,
 } = {}) {
   const issues = [];
   const events = [];
@@ -75,7 +76,7 @@ export async function readAllEvents({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   for (const file of eventFiles) {
-    const isConflictCopy = /\(\d+\)\.jsonl$/.test(file.name) || file.name.includes(' (');
+    const isConflictCopy = /\(\d+\)\.jsonl$/.test(file.name) || file.name.includes(' (') || file.name.includes('.sync-conflict-');
     if (isConflictCopy) {
       issues.push({
         file: file.name,
@@ -117,7 +118,7 @@ export async function readAllEvents({
           lineNo: i + 1,
           reason: parsed.reason,
         });
-      } else {
+      } else if (!sinceMs || Date.parse(parsed.event.ts) >= sinceMs) {
         events.push(parsed.event);
       }
     }

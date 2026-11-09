@@ -14,6 +14,102 @@ export const iciciParser = {
     const accounts = ctx.accounts || [];
     const ownerNames = ctx.ownerNames || [];
 
+    // "<INR|Rs> <amt> spent on ICICI Bank Card XX<4 digits> on <dd-Mon-yy> at <MERCHANT>. Avl Lmt: <INR|Rs> <amt>."
+    const spentOn = flat.match(
+      /(?:INR|Rs\.?)\s*(\d[\d,]*(?:\.\d+)?)\s+spent\s+on\s+ICICI\s+Bank\s+Card\s+XX(\d{4})\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})\s+at\s+(.*?)\.\s*Avl\s+Lmt:?\s*(?:INR|Rs\.?)\s*(\d[\d,]*(?:\.\d+)?)/i
+    );
+    if (spentOn) {
+      const amountPaise = parseAmountToPaise(spentOn[1]);
+      const digits = spentOn[2];
+      const date = parseDateToken(spentOn[3]);
+      const availLimitPaise = parseAmountToPaise(spentOn[5]);
+      if (amountPaise && date) {
+        const accountId = matchAccount('icici', digits, accounts);
+        const accountKey = formatAccountKey(accountId, 'icici', digits);
+        return {
+          issuer: 'icici',
+          accountId,
+          accountHint: { issuer: 'icici', digits },
+          amountPaise,
+          direction: 'debit',
+          kind: 'spend',
+          date,
+          time: null,
+          txnTs: null,
+          merchantRaw: spentOn[4].trim(),
+          mode: 'card',
+          refNo: null,
+          availLimitPaise,
+          dedupeKey: `fp:${accountKey}|${amountPaise}|${date.replace(/-/g, '')}|avl${availLimitPaise}`,
+          linkHint: null,
+          source: 'sms',
+        };
+      }
+    }
+
+    // "ICICI Bank Acc XX<digits> debited Rs. <amt> on <dd-Mon-yy> InfoATD*Auto Debi.Avl Bal ..." is a card bill auto debit.
+    // Other Info codes (BIL*BPAY and so on) name no payee, so they stay in Review.
+    const autoDebit = flat.match(
+      /ICICI\s+Bank\s+Acc\s+XX(\d{3,4})\s+debited\s+Rs\.?\s*(\d[\d,]*(?:\.\d+)?)\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})\s+InfoATD\*/i
+    );
+    if (autoDebit) {
+      const digits = autoDebit[1];
+      const amountPaise = parseAmountToPaise(autoDebit[2]);
+      const date = parseDateToken(autoDebit[3]);
+      if (amountPaise && date) {
+        const accountId = matchAccount('icici', digits, accounts);
+        return {
+          issuer: 'icici',
+          accountId,
+          accountHint: { issuer: 'icici', digits, accountType: 'bank' },
+          amountPaise,
+          direction: 'debit',
+          kind: 'transfer',
+          date,
+          time: null,
+          txnTs: null,
+          merchantRaw: 'Card auto debit',
+          mode: 'other',
+          refNo: null,
+          availLimitPaise: null,
+          dedupeKey: `fp:${formatAccountKey(accountId, 'icici', digits)}|${amountPaise}|${date.replace(/-/g, '')}|atd`,
+          linkHint: null,
+          source: 'sms',
+        };
+      }
+    }
+
+    // "Payment of INR <amt> has been received on your ICICI Bank Credit Card Account <n>xxx<4 digits> on <dd-Mon-yy>."
+    const cardPayment = flat.match(
+      /Payment\s+of\s+(?:INR|Rs\.?)\s*(\d[\d,]*(?:\.\d+)?)\s+has\s+been\s+received\s+on\s+your\s+ICICI\s+Bank\s+Credit\s+Card\s+Account\s+\S*?(\d{4})\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})/i
+    );
+    if (cardPayment) {
+      const amountPaise = parseAmountToPaise(cardPayment[1]);
+      const digits = cardPayment[2];
+      const date = parseDateToken(cardPayment[3]);
+      if (amountPaise && date) {
+        const accountId = matchAccount('icici', digits, accounts);
+        return {
+          issuer: 'icici',
+          accountId,
+          accountHint: { issuer: 'icici', digits },
+          amountPaise,
+          direction: 'credit',
+          kind: 'transfer',
+          date,
+          time: null,
+          txnTs: null,
+          merchantRaw: '',
+          mode: 'other',
+          refNo: null,
+          availLimitPaise: null,
+          dedupeKey: `fp:${formatAccountKey(accountId, 'icici', digits)}|${amountPaise}|${date.replace(/-/g, '')}|payrecv`,
+          linkHint: { type: 'card_payment', side: 'card', cardLast4: digits },
+          source: 'sms',
+        };
+      }
+    }
+
     // Layout A: Card Spend
     // "INR <amt> spent using ICICI Bank Card XX<4 digits> on <dd-Mon-yy> on <MERCHANT>. Avl Limit: INR <amt>. If not you, call ..."
     const spendMatch = flat.match(
@@ -57,7 +153,7 @@ export const iciciParser = {
     // Layout B: Savings Account Debit through UPI
     // "ICICI Bank Acct XX<3 or 4 digits> debited for Rs <amt> on <dd-Mon-yy>; <PAYEE> credited. UPI:<12 digits>. Call ..."
     const upiMatch = flat.match(
-      /ICICI\s+Bank\s+Acct\s+XX(\d{3,4})\s+debited\s+for\s+(?:Rs\.?|INR)\s*([\d,.]+)\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4});\s+(.*?)\s+credited\.\s+UPI:?\s*(\d{12})/i
+      /ICICI\s+Bank\s+Acct\s+XX(\d{3,4})\s+debited\s+for\s+(?:Rs\.?|INR)\s*([\d,.]+)\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})[;,]\s+(.*?)\s+credited\.\s+UPI:?\s*(\d{12})/i
     );
     if (upiMatch) {
       const digits = upiMatch[1];
@@ -96,7 +192,7 @@ export const iciciParser = {
     // Layout C: Savings Account Debit, UPI Mandate
     // "Rs <amt> debited from ICICI Bank Savings Account XX<3 or 4 digits> on <dd-Mon-yy> towards <NAME> for UPI Mandate AutoPay Retrieval Ref No.<12 digits>"
     const mandateMatch = flat.match(
-      /(?:Rs\.?|INR)\s*([\d,.]+)\s+debited\s+from\s+ICICI\s+Bank\s+Savings\s+Account\s+XX(\d{3,4})\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})\s+towards\s+(.*?)\s+for\s+UPI\s+Mandate\s+AutoPay\s+Retrieval\s+Ref\s+No\.?\s*(\d{12})/i
+      /(?:Rs\.?|INR)\s*([\d,.]+)\s+debited\s+from\s+ICICI\s+Bank\s+Savings\s+Account\s+XX(\d{3,4})\s+on\s+(\d{1,2}[-/][a-zA-Z]{3}[-/]\d{2,4})\s+towards\s+(.*?)\s+for\s+(?:UPI\s+Mandate|MERCHANTMANDATE|Subscription\s+for)\s+AutoPay\s+Retrieval\s+Ref\s+No\.?\s*(\d{12})/i
     );
     if (mandateMatch) {
       const amountPaise = parseAmountToPaise(mandateMatch[1]);

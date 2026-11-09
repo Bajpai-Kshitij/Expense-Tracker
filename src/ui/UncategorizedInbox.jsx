@@ -5,6 +5,8 @@ import { formatDateDisplay } from '../core/format/dates.js';
 import { suggestRule } from '../core/categorize/suggest.js';
 import { compilePattern } from '../core/categorize/pattern.js';
 import { findSimilar, planReapply, applyPlan, getNewRulePriority } from '../core/categorize/index.js';
+import { buildMerchantIgnoreRule, findSamePayee } from '../core/ingest/userIgnore.js';
+import { expenseTitle } from '../core/payees/payees.js';
 
 export default function UncategorizedInbox({
   db,
@@ -241,6 +243,25 @@ export default function UncategorizedInbox({
     }
   };
 
+  // Button: reject this payee now and in future SMS scans
+  const handleIgnorePayee = async (exp) => {
+    if (!writer || !exp?.merchant_raw) return;
+    const same = findSamePayee(expenses, exp.merchant_raw);
+    const confirmed = window.confirm(
+      `Remove ${same.length} ${same.length === 1 ? 'expense' : 'expenses'} from "${exp.merchant_raw}" and skip this payee in future SMS?`
+    );
+    if (!confirmed) return;
+    try {
+      await writer.write('rule.upserted', buildMerchantIgnoreRule({ merchant: exp.merchant_raw }));
+      await writer.writeMany(same.map((e) => ({ type: 'expense.deleted', data: { expenseId: e.id } })));
+      showToast(`Removed ${same.length}. This payee will be skipped.`);
+      await loadInboxData();
+      if (onRefreshLookups) await onRefreshLookups();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`);
+    }
+  };
+
   // Assign only target expense
   const handleJustThisOne = async () => {
     if (!writer || !sheet.expense || !sheet.category) return;
@@ -398,6 +419,16 @@ export default function UncategorizedInbox({
                   >
                     Not an expense (Transfer)
                   </button>
+                  {exp.source === 'sms' && exp.merchant_raw && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ color: 'var(--danger)' }}
+                      onClick={() => handleIgnorePayee(exp)}
+                    >
+                      Never import
+                    </button>
+                  )}
                 </div>
               </div>
             );

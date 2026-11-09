@@ -12,7 +12,17 @@ import {
   dismissUnparsed,
 } from '../core/ingest/review.js';
 import { validateAccountForm, buildAccountUpsert } from '../core/accounts/accountForm.js';
-import { rowsToState } from '../core/db/index.js';
+import { loadStateFromDb } from '../core/db/index.js';
+import {
+  applyIgnoreRule,
+  applyIgnoreRulesToOpenItems,
+  buildAccountIgnoreRule,
+  buildTemplateIgnoreRule,
+  countSimilarUnparsed,
+  extractAmountHint,
+  smsTemplateKey,
+} from '../core/ingest/userIgnore.js';
+import { formatIsoIst } from '../core/sync/writer.js';
 import { formatPaise } from '../core/format/money.js';
 import { formatDateDisplay } from '../core/format/dates.js';
 
@@ -71,6 +81,7 @@ export default function ReviewScreen({
   const [items, setItems] = useState([]);
   const [allExpenses, setAllExpenses] = useState({});
   const [heldCountMap, setHeldCountMap] = useState({});
+  const [similarCounts, setSimilarCounts] = useState(new Map());
 
   // Selected account for each unknown account item: { [itemId]: accountId }
   const [selectedAccountForUnknown, setSelectedAccountForUnknown] = useState({});
@@ -95,8 +106,16 @@ export default function ReviewScreen({
     if (!db) return;
     try {
       setLoading(true);
+
+      // Rules saved on the other phone also clear what is waiting on this one.
+      if (writer) {
+        const { rules } = await loadStateFromDb(db);
+        await applyIgnoreRulesToOpenItems({ rules, writer, db });
+      }
+
       const rawItems = await listReviewItems(db);
       setItems(rawItems);
+      setSimilarCounts(countSimilarUnparsed(rawItems));
 
       // Load expenses map for duplicate matching
       const expRows = await db.query('SELECT * FROM expenses;');
@@ -144,14 +163,7 @@ export default function ReviewScreen({
     const digits = item.payload?.digits || item.payload?.product;
 
     try {
-      const state = rowsToState({
-        expenses: await db.query('SELECT * FROM expenses;'),
-        categories: await db.query('SELECT * FROM categories;'),
-        accounts: await db.query('SELECT * FROM accounts;'),
-        brands: await db.query('SELECT * FROM brands;'),
-        rules: await db.query('SELECT * FROM rules;'),
-        review_queue: await db.query('SELECT * FROM review_queue;'),
-      });
+      const state = await loadStateFromDb(db);
 
       const summary = await assignAccountAlias({
         accountId: targetAccountId,
@@ -185,7 +197,7 @@ export default function ReviewScreen({
     setNewAccForm({
       name: defName,
       owner: 'Me',
-      type: 'card',
+      type: item.payload?.accountType || 'card',
       issuer: rawIssuer,
       digits,
     });
@@ -212,14 +224,7 @@ export default function ReviewScreen({
       const issuer = item.payload?.issuer;
       const digits = item.payload?.digits || item.payload?.product;
 
-      const state = rowsToState({
-        expenses: await db.query('SELECT * FROM expenses;'),
-        categories: await db.query('SELECT * FROM categories;'),
-        accounts: await db.query('SELECT * FROM accounts;'),
-        brands: await db.query('SELECT * FROM brands;'),
-        rules: await db.query('SELECT * FROM rules;'),
-        review_queue: await db.query('SELECT * FROM review_queue;'),
-      });
+      const state = await loadStateFromDb(db);
 
       const summary = await assignAccountAlias({
         accountId: upsertData.id,
@@ -247,14 +252,7 @@ export default function ReviewScreen({
     if (!candidateId) return;
 
     try {
-      const state = rowsToState({
-        expenses: await db.query('SELECT * FROM expenses;'),
-        categories: await db.query('SELECT * FROM categories;'),
-        accounts: await db.query('SELECT * FROM accounts;'),
-        brands: await db.query('SELECT * FROM brands;'),
-        rules: await db.query('SELECT * FROM rules;'),
-        review_queue: await db.query('SELECT * FROM review_queue;'),
-      });
+      const state = await loadStateFromDb(db);
 
       await resolveDuplicate({
         reviewId: item.id,
@@ -335,10 +333,43 @@ export default function ReviewScreen({
     }
   };
 
+  // 7b. Unparsed: reject this wording now and in future scans, on both phones
+  const handleIgnoreSimilar = async (item) => {
+    try {
+      const rule = buildTemplateIgnoreRule({
+        body: item.payload?.body,
+        address: item.payload?.address,
+        rawHash: item.payload?.rawHash,
+      });
+      const cleared = await applyIgnoreRule({ rule, writer, db });
+      showToast(`Ignoring messages like this. Cleared ${cleared}.`);
+      await onReloadLookups();
+      await loadData();
+    } catch (err) {
+      showToast(`Failed: ${err.message}`);
+    }
+  };
+
+  // 2b. Unknown account: not ours, stop holding its messages
+  const handleIgnoreAccount = async (item) => {
+    try {
+      const rule = buildAccountIgnoreRule({
+        issuer: item.payload?.issuer,
+        digits: item.payload?.digits || item.payload?.product,
+      });
+      await applyIgnoreRule({ rule, writer, db });
+      showToast('Ignoring messages for this account');
+      await onReloadLookups();
+      await loadData();
+    } catch (err) {
+      showToast(`Failed: ${err.message}`);
+    }
+  };
+
   // 8. Copy masked text
   const handleCopyMasked = async (desc) => {
     try {
-      await navigator.clipboard.writeText(desc.preview);
+      await navigator.clipboard.writeText(desc.fullMasked);
       showToast('Copied masked text to clipboard');
     } catch (err) {
       showToast('Failed to copy');
@@ -453,7 +484,7 @@ export default function ReviewScreen({
                     const stableKey = `${item.payload?.issuer || ''}|${digitsOrProd}`;
                     const waitingCount = heldCountMap[stableKey] || 1;
                     const desc = describeUnknownAccount(item, waitingCount, accounts);
-                    const selectedAccId = selectedAccountForUnknown[item.id] || desc.suggestions[0]?.id || '';
+                    const selectedAccId = selectedAccountForUnknown[item.id] || '';
 
                     return (
                       <div className="card" style={{ marginBottom: '14px' }}>
@@ -475,6 +506,7 @@ export default function ReviewScreen({
                             value={selectedAccId}
                             onChange={(e) => setSelectedAccountForUnknown({ ...selectedAccountForUnknown, [item.id]: e.target.value })}
                           >
+                            <option value="">Choose account…</option>
                             {desc.suggestions.map((acc) => (
                               <option key={acc.id} value={acc.id}>
                                 {acc.name} ({acc.owner} · {acc.type}{acc.lastDigits ? ` · XX${acc.lastDigits}` : ''})
@@ -497,6 +529,14 @@ export default function ReviewScreen({
                             onClick={() => handleOpenCreateAccount(item)}
                           >
                             Create new account
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ color: 'var(--danger)' }}
+                            onClick={() => handleIgnoreAccount(item)}
+                          >
+                            Not ours, ignore
                           </button>
                         </div>
                       </div>
@@ -759,6 +799,7 @@ export default function ReviewScreen({
                   {(() => {
                     const desc = describeUnparsed(item);
                     const isRevealed = Boolean(revealedTexts[item.id]);
+                    const similar = item.payload?.body ? similarCounts.get(smsTemplateKey(item.payload.body)) || 1 : 1;
 
                     const formatReceivedAt = (val) => {
                       if (!val) return '';
@@ -784,7 +825,7 @@ export default function ReviewScreen({
 
                         {/* Preview / Revealed text */}
                         <div style={{ background: 'var(--bg-secondary)', padding: '10px', borderRadius: '6px', marginBottom: '8px', fontSize: '0.85rem', wordBreak: 'break-word' }}>
-                          {isRevealed ? revealedTexts[item.id] : desc.preview}
+                          {revealedTexts[item.id] || item.payload?.body || desc.fullMasked}
                         </div>
 
                         <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginBottom: '10px' }}>
@@ -793,7 +834,7 @@ export default function ReviewScreen({
 
                         {/* Actions */}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                          {!isRevealed && (
+                          {!isRevealed && !item.payload?.body && (
                             <button
                               type="button"
                               className="btn btn-secondary"
@@ -808,10 +849,12 @@ export default function ReviewScreen({
                             className="btn btn-primary"
                             style={{ fontSize: '0.8rem', padding: '6px 10px' }}
                             onClick={() => {
-                              const dateStr = item.payload?.date ? String(item.payload.date).slice(0, 10) : '';
+                              const ms = Number(item.payload?.date);
                               onAddManually({
-                                date: dateStr,
+                                date: ms ? formatIsoIst(ms).slice(0, 10) : '',
+                                amount: extractAmountHint(item.payload?.body),
                                 note: 'from SMS',
+                                sourceText: item.payload?.body || '',
                               });
                             }}
                           >
@@ -831,7 +874,15 @@ export default function ReviewScreen({
                             style={{ fontSize: '0.8rem', padding: '6px 10px', color: 'var(--danger)' }}
                             onClick={() => handleDismissUnparsed(item)}
                           >
-                            Dismiss
+                            Dismiss only this
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                            onClick={() => handleIgnoreSimilar(item)}
+                          >
+                            Ignore all like this{similar > 1 ? ` (${similar})` : ''}
                           </button>
                         </div>
                       </div>

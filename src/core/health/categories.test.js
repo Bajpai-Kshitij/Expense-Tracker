@@ -138,9 +138,9 @@ describe('Category Health & Integrity', () => {
         seedCategories: SEED_CATEGORIES,
       });
 
-      // SEED_CATEGORIES has 12 items. cat_food was active, so 11 needed restore (cat_fuel archived + 10 missing)
-      expect(res1.restoredCount).toBe(11);
-      expect(writtenEvents).toHaveLength(11);
+      // SEED_CATEGORIES has 13 items (cat_fees added). cat_food was active, so 12 needed restore.
+      expect(res1.restoredCount).toBe(12);
+      expect(writtenEvents).toHaveLength(12);
 
       // cat_food was NOT restored/overwritten
       const foodEvent = writtenEvents.find((e) => e.data.id === 'cat_food');

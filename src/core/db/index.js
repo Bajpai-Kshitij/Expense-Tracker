@@ -1,7 +1,7 @@
 export { MIGRATIONS, migrate } from './migrations.js';
 export { findExpenseIdByKey } from './expenseKeys.js';
-export { stateToRows, rowsToState } from './mapper.js';
-export { rebuildFromEvents, applyEventsToDb, dumpDatabase } from './sync.js';
+export { stateToRows, rowsToState, getExpenseExtras } from './mapper.js';
+export { rebuildFromEvents, applyEventsToDb, dumpDatabase, loadStateFromDb } from './sync.js';
 export {
   listExpenses,
   totals,

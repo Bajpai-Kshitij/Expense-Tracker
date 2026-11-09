@@ -16,6 +16,7 @@ export const SEED_CATEGORIES = [
   { id: 'cat_cash', name: 'Cash', icon: '💵', color: '#10b981' },
   { id: 'cat_insurance', name: 'Insurance', icon: '🛡', color: '#06b6d4' },
   { id: 'cat_other', name: 'Other', icon: '📦', color: '#94a3b8' },
+  { id: 'cat_fees', name: 'Fees and Taxes', icon: '🧮', color: '#78716c' },
 ];
 
 export const SEED_ACCOUNTS = [
@@ -75,6 +76,22 @@ async function setSettingValue(settings, db, key, value) {
   }
 }
 
+/** Adds cat_fees to installs seeded before that category existed. */
+async function addFeesCategoryOnce({ writer, state, settings, db }) {
+  if ((await getSettingValue(settings, db, 'seeded_cat_fees')) === '1') {
+    return { seeded: false, writtenCount: 0 };
+  }
+  let exists = Boolean(state?.categories?.cat_fees);
+  if (!state && db && typeof db.query === 'function') {
+    exists = (await db.query("SELECT 1 FROM categories WHERE id = 'cat_fees';")).length > 0;
+  }
+  if (!exists) {
+    await writer.write('category.upserted', { ...SEED_CATEGORIES.find((c) => c.id === 'cat_fees'), seed: true });
+  }
+  await setSettingValue(settings, db, 'seeded_cat_fees', '1');
+  return { seeded: false, writtenCount: exists ? 0 : 1 };
+}
+
 /**
  * Seeds initial categories and accounts into event log if not already seeded.
  * Runs after the first sync of a session.
@@ -89,7 +106,7 @@ async function setSettingValue(settings, db, key, value) {
 export async function seedIfEmpty({ writer, state, settings, db } = {}) {
   const seededStatus = await getSettingValue(settings, db, 'seeded');
   if (seededStatus === '1') {
-    return { seeded: false, writtenCount: 0 };
+    return addFeesCategoryOnce({ writer, state, settings, db });
   }
 
   // Determine existing category and account IDs
@@ -116,7 +133,7 @@ export async function seedIfEmpty({ writer, state, settings, db } = {}) {
   // Upsert missing seed categories
   for (const cat of SEED_CATEGORIES) {
     if (!existingCatIds.has(cat.id)) {
-      await writer.write('category.upserted', cat);
+      await writer.write('category.upserted', { ...cat, seed: true });
       writtenCount++;
     }
   }
@@ -124,13 +141,14 @@ export async function seedIfEmpty({ writer, state, settings, db } = {}) {
   // Upsert missing seed accounts
   for (const acc of SEED_ACCOUNTS) {
     if (!existingAccIds.has(acc.id)) {
-      await writer.write('account.upserted', acc);
+      await writer.write('account.upserted', { ...acc, seed: true });
       writtenCount++;
     }
   }
 
   // Mark seeded in settings
   await setSettingValue(settings, db, 'seeded', '1');
+  await setSettingValue(settings, db, 'seeded_cat_fees', '1');
 
   return { seeded: true, writtenCount };
 }

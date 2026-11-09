@@ -337,15 +337,18 @@ public class ExpenseNativePlugin extends Plugin {
                 if (!appendSucceeded) {
                     modeUsed = "rewrite";
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    // A failed read must abort: rewriting now would erase this device's log.
                     try (InputStream is = resolver.openInputStream(fileUri)) {
-                        if (is != null) {
-                            byte[] buffer = new byte[8192];
-                            int read;
-                            while ((read = is.read(buffer)) != -1) {
-                                baos.write(buffer, 0, read);
-                            }
+                        if (is == null) {
+                            call.reject("Failed to read existing log before rewriting", "IO_ERROR");
+                            return;
                         }
-                    } catch (Throwable ignored) {}
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = is.read(buffer)) != -1) {
+                            baos.write(buffer, 0, read);
+                        }
+                    }
                     baos.write(lineBytes);
                     byte[] fullContent = baos.toByteArray();
 
@@ -415,6 +418,33 @@ public class ExpenseNativePlugin extends Plugin {
                 call.resolve(ret);
             } catch (Throwable t) {
                 call.reject("Failed to write file: " + t.getMessage(), "IO_ERROR", new Exception(t));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void deleteFile(PluginCall call) {
+        String uriStr = call.getString("uri");
+        String name = call.getString("name");
+        if (uriStr == null || uriStr.isEmpty()) {
+            call.reject("Missing folder uri", "BAD_ARGS");
+            return;
+        }
+        if (!isValidFilename(name)) {
+            call.reject("Invalid file name: " + name, "BAD_NAME");
+            return;
+        }
+
+        getBridge().execute(() -> {
+            try {
+                Uri fileUri = findChildUri(Uri.parse(uriStr), name);
+                boolean deleted = fileUri != null
+                    && DocumentsContract.deleteDocument(getContext().getContentResolver(), fileUri);
+                JSObject ret = new JSObject();
+                ret.put("deleted", deleted);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.reject("Failed to delete file: " + t.getMessage(), "IO_ERROR", new Exception(t));
             }
         });
     }

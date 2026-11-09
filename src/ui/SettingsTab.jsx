@@ -14,6 +14,8 @@ export default function SettingsTab({
   onRebuildFromLogs,
   onChangeFolder,
   onUpdateDeviceLabel,
+  onMergeDevice,
+  onStartFresh,
   onNavigateToRulesBrands,
   onNavigateToSmsImport,
   onNavigateToStatementImport,
@@ -33,6 +35,7 @@ export default function SettingsTab({
   const [rebuildLoading, setRebuildLoading] = useState(false);
   const [healthStatus, setHealthStatus] = useState('');
   const [restoringCategories, setRestoringCategories] = useState(false);
+  const [mergeTargets, setMergeTargets] = useState({});
 
   const handleRestoreDefaultCategories = async () => {
     try {
@@ -92,6 +95,13 @@ export default function SettingsTab({
     } finally {
       setRebuildLoading(false);
     }
+  };
+
+  const handleStartFreshClick = () => {
+    const confirmed = window.confirm(
+      'Delete all expenses and stored messages on BOTH phones? Accounts, categories, rules, household names and senders are kept. A backup file stays in the shared folder.'
+    );
+    if (confirmed) onStartFresh();
   };
 
   const handleChangeFolderClick = () => {
@@ -316,6 +326,7 @@ export default function SettingsTab({
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  flexWrap: 'wrap',
                   padding: '8px 0',
                   borderBottom: '1px solid var(--border-color)',
                   fontSize: '0.85rem',
@@ -328,6 +339,29 @@ export default function SettingsTab({
                   )}
                 </div>
                 <code style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{d.deviceId}</code>
+                {d.deviceId !== deviceId && (
+                  <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: '6px' }}>
+                    <select
+                      className="form-select"
+                      style={{ flex: 1 }}
+                      value={mergeTargets[d.deviceId] || ''}
+                      onChange={(e) => setMergeTargets((prev) => ({ ...prev, [d.deviceId]: e.target.value }))}
+                    >
+                      <option value="">Whose expenses are these?</option>
+                      {devices.filter((o) => o.deviceId !== d.deviceId).map((o) => (
+                        <option key={o.deviceId} value={o.deviceId}>{o.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={!mergeTargets[d.deviceId]}
+                      onClick={() => onMergeDevice(d.deviceId, mergeTargets[d.deviceId])}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -360,6 +394,19 @@ export default function SettingsTab({
             {healthStatus}
           </div>
         )}
+      </div>
+
+      {/* Start fresh */}
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <div className="card-header">
+          <span className="card-title">Start fresh</span>
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+          Removes all expenses on both phones and keeps your configuration.
+        </p>
+        <button type="button" className="btn btn-danger" onClick={handleStartFreshClick}>
+          Start fresh
+        </button>
       </div>
 
       {/* Developer Tools (Collapsed) */}

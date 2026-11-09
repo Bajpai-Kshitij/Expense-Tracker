@@ -197,6 +197,13 @@ export async function writeFile(options) {
  * @param {number} [options.limit=500] - Max messages to retrieve (max 2000).
  * @returns {Promise<SmsMessage[]>} Messages ordered by date ascending.
  */
+export async function deleteFile(options) {
+  checkPlatform();
+  validateUri(options?.uri);
+  validateName(options?.name);
+  return ExpenseNative.deleteFile({ uri: options.uri, name: options.name });
+}
+
 export async function readSms(options = {}) {
   checkPlatform();
   if (options && typeof options !== 'object') {

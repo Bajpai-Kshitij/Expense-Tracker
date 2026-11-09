@@ -1,4 +1,4 @@
-import { planImport, applyImport } from '../core/ingest/pipeline.js';
+import { planImport, applyImport, reprocessOpenUnparsed } from '../core/ingest/pipeline.js';
 import { sanitizeAllowlist } from '../core/ingest/senders.js';
 
 let isScanRunning = false;
@@ -162,6 +162,25 @@ export async function scanSms({
       },
       newestMessageDate: null,
     };
+
+    // Messages already stored as unparsed may be readable by newer parsers.
+    if (db && writer && typeof getState === 'function' && typeof db.query === 'function') {
+      try {
+        const ownerRows = await db.query('SELECT value FROM settings WHERE key = ?;', ['owner_names']);
+        const later = await reprocessOpenUnparsed({
+          db,
+          writer,
+          state: await getState(),
+          ownerNames: ownerRows[0]?.value ? JSON.parse(ownerRows[0].value) : [],
+        });
+        aggregatedSummary.created += later.created;
+        for (const [k, v] of Object.entries(later.byKind)) {
+          aggregatedSummary.byKind[k] = (aggregatedSummary.byKind[k] || 0) + v;
+        }
+      } catch (e) {
+        console.error('Re-reading stored messages failed:', e?.message);
+      }
+    }
 
     // 3. Batch loop (limit 500)
     while (true) {

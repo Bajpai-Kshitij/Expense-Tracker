@@ -82,7 +82,7 @@ export function parseSms(message, ctx = {}) {
       if (detects) {
         hadDetectingParser = true;
         try {
-          const txn = parser.parse({ lines, flat }, ctx);
+          const txn = parser.parse({ lines, flat, receivedAt: Number(message.date) || null }, ctx);
           if (txn && typeof txn === 'object') {
             return { status: 'parsed', rawHash, txn };
           }
@@ -101,7 +101,10 @@ export function parseSms(message, ctx = {}) {
         flat
       );
 
-    if (hasAmount && hasFinancialKeyword) {
+    // Payment wordings the general test misses: "Sent Rs." and an amount with no currency word.
+    const looksLikePayment = /\bsent\s+(?:rs|inr)|\bdebited\s+by\s+[\d,]/i.test(flat);
+
+    if ((hasAmount && hasFinancialKeyword) || looksLikePayment) {
       const reason = (hadDetectingParser || parserHadError) ? 'format_mismatch' : 'no_parser';
       return { status: 'unparsed', reason, rawHash };
     }

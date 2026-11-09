@@ -4,6 +4,14 @@
  * raw message retention, settings, and sync state tracking.
  */
 
+// Joint-account expenses belong to neither person, so individual views leave them out.
+function addExcludeAccounts(filters, conditions, params) {
+  const ids = filters.excludeAccountIds || [];
+  if (ids.length === 0) return;
+  conditions.push(`(account_id IS NULL OR account_id NOT IN (${ids.map(() => '?').join(', ')}))`);
+  params.push(...ids);
+}
+
 function buildExpenseFilterClause(filters = {}, { forTotals = false } = {}) {
   const conditions = [];
   const params = [];
@@ -56,8 +64,11 @@ function buildExpenseFilterClause(filters = {}, { forTotals = false } = {}) {
   }
 
   if (filters.createdByDev) {
-    conditions.push('created_by_dev = ?');
-    params.push(filters.createdByDev);
+    // One device id, or several comma-separated when a person has older installs.
+    const ids = String(filters.createdByDev).split(',');
+    conditions.push(`created_by_dev IN (${ids.map(() => '?').join(', ')})`);
+    params.push(...ids);
+    addExcludeAccounts(filters, conditions, params);
   }
 
   if (filters.text) {
@@ -211,15 +222,20 @@ export async function totalsByMonth(db, filters = {}) {
  * @param {object} db - Database adapter.
  * @returns {Promise<object[]>} Uncategorized active expenses.
  */
-export async function uncategorizedInbox(db) {
+export async function uncategorizedInbox(db, filters = {}) {
+  const params = filters.createdByDev ? String(filters.createdByDev).split(',') : [];
+  const conditions = params.length > 0 ? [`created_by_dev IN (${params.map(() => '?').join(', ')})`] : [];
+  if (params.length > 0) addExcludeAccounts(filters, conditions, params);
+  const deviceClause = conditions.map((c) => `AND ${c}`).join(' ');
   const sql = `
     SELECT * FROM expenses
     WHERE (kind = 'spend' OR kind = 'fixed')
       AND category_id IS NULL
       AND status = 'active'
+      ${deviceClause}
     ORDER BY date DESC, txn_ts DESC, id DESC;
   `;
-  return db.query(sql);
+  return db.query(sql, params);
 }
 
 /**

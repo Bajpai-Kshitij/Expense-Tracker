@@ -10,8 +10,9 @@ import {
 import { testBankParser } from '../core/statements/parsers/testbank.js';
 import { checkTotals, isNeedsAttention } from '../core/statements/import/reconcile.js';
 import { planStatementImport } from '../core/statements/import/plan.js';
-import { applyStatementImport } from '../core/statements/import/apply.js';
-import { rowsToState } from '../core/db/index.js';
+import { applyStatementImport, undoStatementImport } from '../core/statements/import/apply.js';
+import { accountHasEnding, addAccountAlias, suggestStatementAccount } from '../core/statements/import/accountSuggest.js';
+import { loadStateFromDb } from '../core/db/index.js';
 import { formatPaise } from '../core/format/money.js';
 
 export default function StatementImport({
@@ -21,6 +22,7 @@ export default function StatementImport({
   onBack,
   onNavigateToReview,
   showToast = () => {},
+  onReloadLookups = () => {},
   autoLoadSample = false,
 }) {
   const [file, setFile] = useState(null);
@@ -36,6 +38,7 @@ export default function StatementImport({
   const [isDuplicateFile, setIsDuplicateFile] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [isApplying, setIsApplying] = useState(false);
+  const [saveAlias, setSaveAlias] = useState(true);
 
   const fileInputRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -128,22 +131,11 @@ export default function StatementImport({
 
       setParseResult(parsed);
 
-      // Preselect matching account if parser detected card digits
-      let matchedAccountId = '';
-      if (parsed.account?.digits) {
-        const found = accountList.find(
-          (acc) =>
-            (acc.digits && String(acc.digits).endsWith(parsed.account.digits)) ||
-            (acc.name && acc.name.includes(parsed.account.digits))
-        );
-        if (found) {
-          matchedAccountId = found.id || found.accountId;
-        }
-      }
-
-      if (!matchedAccountId && accountList.length > 0) {
-        matchedAccountId = accountList[0].id || accountList[0].accountId;
-      }
+      // Only an exact issuer and card-ending match is selected; otherwise the user chooses.
+      const matchedAccountId = suggestStatementAccount(
+        { issuer: parsed.issuer, digits: parsed.account?.digits },
+        accountList
+      ).accountId || '';
       setSelectedAccountId(matchedAccountId);
 
       // Check if file was previously imported
@@ -162,18 +154,7 @@ export default function StatementImport({
       setIsDuplicateFile(isDup);
 
       // Read current state to build preview plan
-      let currentState = {};
-      if (db) {
-        const rows = {
-          expenses: await db.query('SELECT * FROM expenses;'),
-          categories: await db.query('SELECT * FROM categories;'),
-          accounts: await db.query('SELECT * FROM accounts;'),
-          brands: await db.query('SELECT * FROM brands;'),
-          rules: await db.query('SELECT * FROM rules;'),
-          expense_keys: await db.query('SELECT * FROM expense_keys;'),
-        };
-        currentState = rowsToState(rows);
-      }
+      const currentState = db ? await loadStateFromDb(db) : {};
 
       const generatedPlan = planStatementImport({
         result: parsed,
@@ -207,15 +188,7 @@ export default function StatementImport({
     setSelectedAccountId(newAccId);
     if (!parseResult || !fileHash || !db) return;
 
-    const rows = {
-      expenses: await db.query('SELECT * FROM expenses;'),
-      categories: await db.query('SELECT * FROM categories;'),
-      accounts: await db.query('SELECT * FROM accounts;'),
-      brands: await db.query('SELECT * FROM brands;'),
-      rules: await db.query('SELECT * FROM rules;'),
-      expense_keys: await db.query('SELECT * FROM expense_keys;'),
-    };
-    const currentState = rowsToState(rows);
+    const currentState = await loadStateFromDb(db);
 
     const updatedPlan = planStatementImport({
       result: parseResult,
@@ -229,6 +202,13 @@ export default function StatementImport({
 
   const handleConfirmImport = async (forceAnyway = false) => {
     if (!plan) return;
+    if (!selectedAccountId) {
+      setErrorMessage('Choose the account this statement belongs to.');
+      return;
+    }
+    if (mismatch && !window.confirm(`This is a ${parseResult.issuer} statement, but the chosen account is from another bank. Import anyway?`)) {
+      return;
+    }
     try {
       setIsApplying(true);
       setErrorMessage('');
@@ -236,18 +216,7 @@ export default function StatementImport({
       let planToApply = plan;
       if (forceAnyway && isDuplicateFile) {
         // User explicitly chose "Import again anyway"
-        let currentState = {};
-        if (db) {
-          const rows = {
-            expenses: await db.query('SELECT * FROM expenses;'),
-            categories: await db.query('SELECT * FROM categories;'),
-            accounts: await db.query('SELECT * FROM accounts;'),
-            brands: await db.query('SELECT * FROM brands;'),
-            rules: await db.query('SELECT * FROM rules;'),
-            expense_keys: await db.query('SELECT * FROM expense_keys;'),
-          };
-          currentState = rowsToState(rows);
-        }
+        const currentState = db ? await loadStateFromDb(db) : {};
         planToApply = planStatementImport({
           result: parseResult,
           fileHash,
@@ -259,6 +228,11 @@ export default function StatementImport({
       }
 
       await applyStatementImport({ plan: planToApply, writer, db });
+      if (saveAlias && selectedAccount && parseResult?.account?.digits) {
+        const withAlias = addAccountAlias(selectedAccount, { issuer: parseResult.issuer, digits: parseResult.account.digits });
+        if (withAlias) await writer.write('account.upserted', withAlias);
+      }
+      await onReloadLookups();
       setImportResult(planToApply.summary);
       showToast('Statement imported successfully');
     } catch (err) {
@@ -267,6 +241,20 @@ export default function StatementImport({
       if (isMountedRef.current) {
         setIsApplying(false);
       }
+    }
+  };
+
+  const handleUndoImport = async () => {
+    if (!fileHash || !window.confirm('Remove the expenses this statement created?')) return;
+    try {
+      setIsApplying(true);
+      const removed = await undoStatementImport({ fileHash, writer, db });
+      showToast(`Removed ${removed} ${removed === 1 ? 'expense' : 'expenses'}`);
+      await onReloadLookups();
+      onBack();
+    } catch (err) {
+      setErrorMessage(`Failed to undo import: ${err?.message || err}`);
+      if (isMountedRef.current) setIsApplying(false);
     }
   };
 
@@ -283,6 +271,16 @@ export default function StatementImport({
     setFile({ name: 'sample_testbank_statement.pdf' });
     await processStatementBuffer(new ArrayBuffer(16), 'sample_testbank_hash_1', sampleTextLines);
   };
+
+  const selectedAccount = accountList.find((a) => (a.id || a.accountId) === selectedAccountId) || null;
+  const detected = { issuer: parseResult?.issuer, digits: parseResult?.account?.digits };
+  const suggestion = suggestStatementAccount(detected, accountList, selectedAccountId);
+  const mismatch = suggestion.issuerMismatch;
+  const offerAlias = Boolean(selectedAccount && detected.digits && !mismatch && !accountHasEnding(selectedAccount, detected));
+  const accountOptions = [
+    ...suggestion.candidates,
+    ...accountList.filter((a) => !suggestion.candidates.includes(a)),
+  ];
 
   const getStatusChip = (status) => {
     switch (status) {
@@ -321,7 +319,7 @@ export default function StatementImport({
             Import Complete
           </h3>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '16px' }}>
-            {importResult.created} new expenses created, {importResult.linkedToSms} linked to SMS, {importResult.alreadyImported} already imported.
+            {importResult.created} new expenses created, {importResult.linkedToSms} linked to SMS, {importResult.alreadyImported} already imported{importResult.repaired > 0 ? `, ${importResult.repaired} corrected` : ''}.
           </p>
 
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -334,6 +332,15 @@ export default function StatementImport({
                 📋 Open Review ({importResult.possibleDuplicates})
               </button>
             )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ color: 'var(--danger)' }}
+              disabled={isApplying}
+              onClick={handleUndoImport}
+            >
+              Undo this import
+            </button>
             <button
               type="button"
               className="btn btn-secondary"
@@ -431,15 +438,27 @@ export default function StatementImport({
                 ⚠️ Statement File Already Imported
               </h4>
               <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem' }}>
-                This statement was already imported earlier. All lines are safe against double counting.
+                This statement was already imported earlier. All lines are safe against double counting. Importing again adds missed lines and corrects EMI and fee lines; your own edits are kept.
               </p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => handleConfirmImport(true)}
-              >
-                Import again anyway
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={isApplying || !selectedAccountId}
+                  onClick={() => handleConfirmImport(true)}
+                >
+                  Import again and correct
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ color: 'var(--danger)' }}
+                  disabled={isApplying}
+                  onClick={handleUndoImport}
+                >
+                  Undo earlier import
+                </button>
+              </div>
             </div>
           )}
 
@@ -489,13 +508,30 @@ export default function StatementImport({
                 value={selectedAccountId}
                 onChange={(e) => handleAccountChange(e.target.value)}
               >
-                {accountList.map((acc) => (
+                <option value="">Choose account…</option>
+                {accountOptions.map((acc) => (
                   <option key={acc.id || acc.accountId} value={acc.id || acc.accountId}>
                     {acc.name} ({acc.type || 'account'})
                   </option>
                 ))}
               </select>
             </div>
+            {!selectedAccountId && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>
+                No account has this card ending yet. Choose the right one.
+              </div>
+            )}
+            {mismatch && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--danger)' }}>
+                ⚠️ This statement is from {parseResult.issuer}, but this account is from another bank.
+              </div>
+            )}
+            {offerAlias && (
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '0.8rem', marginTop: '8px' }}>
+                <input type="checkbox" checked={saveAlias} onChange={(e) => setSaveAlias(e.target.checked)} />
+                Remember card ending {detected.digits} for this account
+              </label>
+            )}
           </div>
 
           {/* Summary Metric Chips */}
@@ -574,7 +610,7 @@ export default function StatementImport({
                 type="button"
                 className="btn btn-secondary"
                 style={{ borderColor: 'var(--warning)', color: 'var(--warning)', flex: 1 }}
-                disabled={isApplying}
+                disabled={isApplying || !selectedAccountId}
                 onClick={() => handleConfirmImport(false)}
               >
                 {isApplying ? 'Importing...' : '⚠️ Import anyway'}
@@ -584,7 +620,7 @@ export default function StatementImport({
                 type="button"
                 className="btn btn-primary"
                 style={{ flex: 1 }}
-                disabled={isApplying || isDuplicateFile}
+                disabled={isApplying || isDuplicateFile || !selectedAccountId}
                 onClick={() => handleConfirmImport(false)}
               >
                 {isApplying ? 'Importing...' : 'Confirm Import'}

@@ -213,7 +213,7 @@ export function parse(lines = [], ctx = {}) {
 
   for (let i = sliceStart; i < sliceEnd; i++) {
     const l = normLines[i];
-    const text = l.text.trim();
+    let text = l.text.trim();
     if (!text) continue;
 
     // Check for card block line: e.g. XXXXXXXXXXXX7922
@@ -226,6 +226,12 @@ export function parse(lines = [], ctx = {}) {
         }
       }
       continue;
+    }
+
+    // Side text from the page margin can be glued in front of a transaction.
+    const gluedStart = text.search(/\d{2}\/\d{2}\/\d{4}\s+\d{8,14}\s+.*[\d,]+\.\d{2}(?:\s*CR)?$/i);
+    if (gluedStart > 0) {
+      text = text.slice(gluedStart);
     }
 
     // Inside transaction section, ignore every line that does not start with dd/mm/yyyy
@@ -334,7 +340,22 @@ export function parse(lines = [], ctx = {}) {
           const expectedTax = Math.round(cand.amountPaise * 0.18);
           if (Math.abs(expectedTax - line.amountPaise) <= 1) {
             pairedBaseIndices.add(j);
+            const plansThatDay = result.emiPlans.filter((p) => p.creationDate === line.date);
             if (cand.type === 'emi_interest') {
+              line.type = 'emi_tax';
+            } else if (cand.type === 'purchase' && plansThatDay.length > 0) {
+              // A purchase on an EMI's creation date that carries 18% IGST is its processing fee.
+              const plan = plansThatDay.length === 1 ? plansThatDay[0] : null;
+              for (const feeLine of [cand, line]) {
+                feeLine.isPlanFee = true;
+                if (plan) {
+                  feeLine.plan = plan;
+                  feeLine.emiFinishDate = plan.finishDate;
+                  feeLine.emiOutstandingPaise = plan.outstandingPaise;
+                  feeLine.emiMonthlyPaise = plan.monthlyPaise;
+                }
+              }
+              cand.type = 'emi_fee';
               line.type = 'emi_tax';
             } else {
               cand.type = 'fee';
@@ -346,20 +367,47 @@ export function parse(lines = [], ctx = {}) {
     }
   }
 
-  // 7. EMI GROUPING:
-  // For each date, group the emi_interest, emi_tax and emi_principal lines.
-  const emiGroupMap = new Map();
-  for (let i = 0; i < rawTxnLines.length; i++) {
-    const line = rawTxnLines[i];
-    if (line.type === 'emi_interest' || line.type === 'emi_tax' || line.type === 'emi_principal') {
-      if (!emiGroupMap.has(line.date)) {
-        emiGroupMap.set(line.date, []);
-      }
-      emiGroupMap.get(line.date).push(line);
-    }
+  // 6b. EMI CONVERSION: a credit equal to a plan's loan on its creation date reverses the
+  // original purchase. Both are transfers, but only when the purchase is in this statement;
+  // otherwise the credit stays a refund and cancels the purchase in the earlier statement.
+  const usedConversionDebits = new Set();
+  for (const plan of result.emiPlans) {
+    const credit = rawTxnLines.find(
+      (l) => l.direction === 'credit' && l.type === 'refund' && l.date === plan.creationDate && l.amountPaise === plan.loanPaise
+    );
+    if (!credit) continue;
+    const debit = rawTxnLines
+      .filter((l) => l.type === 'purchase' && l.amountPaise === plan.loanPaise && l.date <= plan.creationDate && !usedConversionDebits.has(l))
+      .pop();
+    if (!debit) continue;
+    usedConversionDebits.add(debit);
+    credit.type = 'emi_conversion';
+    debit.type = 'emi_conversion';
   }
 
-  for (const [date, emiLines] of emiGroupMap.entries()) {
+  // 7. EMI GROUPING:
+  // One installment is interest, tax and principal. Several EMIs can fall on one date, so a new
+  // group starts when a part repeats or the <n/N> marker changes.
+  const emiGroups = [];
+  let currentGroup = null;
+  for (const line of rawTxnLines) {
+    const isInstallmentLine = !line.isPlanFee && ['emi_interest', 'emi_tax', 'emi_principal'].includes(line.type);
+    if (!isInstallmentLine) continue;
+    const marker = line.details.match(/<\d+\/\d+>.*$/)?.[0] || null;
+    const startsNew =
+      !currentGroup ||
+      currentGroup.date !== line.date ||
+      (line.type !== 'emi_tax' && currentGroup.lines.some((l) => l.type === line.type)) ||
+      (marker && currentGroup.marker && marker !== currentGroup.marker);
+    if (startsNew) {
+      currentGroup = { date: line.date, marker: null, lines: [] };
+      emiGroups.push(currentGroup);
+    }
+    currentGroup.marker = currentGroup.marker || marker;
+    currentGroup.lines.push(line);
+  }
+
+  for (const { lines: emiLines } of emiGroups) {
     // Collect marker <n/N>Merchant
     let emiNo = null;
     let emiTotal = null;

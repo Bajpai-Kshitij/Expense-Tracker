@@ -1,7 +1,99 @@
-import { parseAmountToPaise, parseDateToken, parseTimeToken, toTxnTs } from '../normalize.js';
+import { parseAmountToPaise, parseDateToken, parseTimeToken, toTxnTs, isHouseholdName, istDateFromMs } from '../normalize.js';
 import { matchAccount } from '../accounts.js';
 import { formatAccountKey, formatCompactDateTime } from '../keys.js';
 import { registerParser } from '../registry.js';
+
+const AMT = '(\\d[\\d,]*(?:\\.\\d+)?)';
+const DATE = '(\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4})';
+const TIME = '(\\d{1,2}:\\d{2}:\\d{2})';
+
+const SPENT_CARD = new RegExp(`^Spent\\s+Card\\s+no\\.?\\s+XX(\\d+)\\s+(?:INR|Rs\\.?)\\s*${AMT}\\s+${DATE}\\s+${TIME}(?:\\s+IST)?\\s+(.*?)\\s+Avl\\s+L(?:i)?m(?:i)?t:?\\s*(?:INR|Rs\\.?)\\s*${AMT}`, 'i');
+const DEBIT_A = new RegExp(`^Debit\\s+(?:INR|Rs\\.?)\\s*${AMT}\\s+(?:Axis\\s+Bank\\s+)?A\\/c(?:\\s+no\\.?)?\\s+XX(\\d+)\\s+${DATE},?\\s+${TIME}(?:\\s+IST)?\\s+(.+?)(?:\\s+WhatsApp\\b|\\s+Chk\\s+Bal|\\s+Bal\\s+INR|\\s+Not\\s+You|\\s+\\S+\\s+Cust\\b)`, 'i');
+const DEBIT_B = new RegExp(`^INR\\s*${AMT}\\s+debited\\s+A\\/c\\s+no\\.?\\s+XX(\\d+)\\s+${DATE},?\\s+${TIME}(?:\\s+IST)?\\s+(.+?)\\s+Not\\s+You`, 'i');
+const UPI_CREDIT = new RegExp(`(?:INR|Rs\\.?)\\s*${AMT}\\s+credited\\s+to\\s+A\\/c\\s+no\\.?\\s+XX(\\d+)\\s+on\\s+${DATE}\\s+at\\s+${TIME}(?:\\s+IST)?\\.?\\s+Info\\s*-\\s*UPI\\/P2[AM]\\/(\\d{12})\\/([^/]*?)(?:\\/|\\s+-\\s+Axis|\\s+Chk)`, 'i');
+const CARD_PAYMENT = new RegExp(`payment\\s+of\\s+Rs\\.?\\s*${AMT}\\s+towards\\s+your\\s+Axis\\s+Bank\\s+Credit\\s+Card\\s+X+(\\d{4})\\s+has\\s+been\\s+received\\s+on\\s+(\\d{1,2}-[A-Za-z]{3}-\\d{2,4})`, 'i');
+const CASHBACK = new RegExp(`Cashback\\s+of\\s+INR\\s*${AMT}\\s+has\\s+been\\s+credited\\s+to\\s+your\\s+Axis\\s+Bank\\s+.*?Credit\\s+Card\\s+XX(\\d+)`, 'i');
+
+function base(digits, accounts) {
+  const accountId = matchAccount('axis', digits, accounts);
+  return { issuer: 'axis', accountId, accountHint: { issuer: 'axis', digits }, accountKey: formatAccountKey(accountId, 'axis', digits) };
+}
+
+/** Classifies a bank-account debit narration; null sends the message to Review. */
+function classifyNarration(narration, ownerNames) {
+  const upi = narration.match(/^UPI\/P2[AM]\/(\d{12})\/([^/]*)/i);
+  if (upi) {
+    const payee = upi[2].trim();
+    return { kind: isHouseholdName(payee, ownerNames) ? 'transfer' : 'spend', merchantRaw: payee, mode: 'upi', refNo: upi[1], linkHint: null };
+  }
+  if (narration.startsWith('CRD-PMNT-')) {
+    const card = narration.match(/\*{2,4}(\d{4})/);
+    return { kind: 'transfer', merchantRaw: '', mode: 'other', refNo: null, linkHint: { type: 'card_payment', side: 'bank', cardLast4: card ? card[1] : '' } };
+  }
+  if (narration.startsWith('ACH-DR-')) return { kind: 'fixed', merchantRaw: narration, mode: 'other', refNo: null, linkHint: null };
+  if (/card\s*payment/i.test(narration)) return { kind: 'transfer', merchantRaw: narration, mode: 'other', refNo: null, linkHint: null };
+  return null;
+}
+
+function parseLaterLayouts(flat, ctx, receivedAt) {
+  const accounts = ctx.accounts || [];
+  const ownerNames = ctx.ownerNames || [];
+
+  let m = flat.match(SPENT_CARD);
+  if (m) {
+    const amountPaise = parseAmountToPaise(m[2]);
+    const date = parseDateToken(m[3]);
+    const time = parseTimeToken(m[4]);
+    const availLimitPaise = parseAmountToPaise(m[6]);
+    if (!amountPaise || !date || !time) return null;
+    const { accountKey, ...acc } = base(m[1], accounts);
+    return { ...acc, amountPaise, direction: 'debit', kind: 'spend', date, time, txnTs: toTxnTs(date, time), merchantRaw: m[5].trim(), mode: 'card', refNo: null, availLimitPaise, dedupeKey: `fp:${accountKey}|${amountPaise}|${formatCompactDateTime(date, time)}${availLimitPaise !== null ? `|avl${availLimitPaise}` : ''}`, linkHint: null, source: 'sms' };
+  }
+
+  m = flat.match(DEBIT_A) || flat.match(DEBIT_B);
+  if (m) {
+    const amountPaise = parseAmountToPaise(m[1]);
+    const date = parseDateToken(m[3]);
+    const time = parseTimeToken(m[4]);
+    const narration = m[5].trim();
+    const classified = classifyNarration(narration, ownerNames);
+    if (!amountPaise || !date || !time || !classified) return null;
+    const { accountKey, ...acc } = base(m[2], accounts);
+    const dedupeKey = classified.refNo ? `ref:${classified.refNo}` : `fp:${accountKey}|${amountPaise}|${formatCompactDateTime(date, time)}|${narration.split(/\s+/)[0]}`;
+    return { ...acc, amountPaise, direction: 'debit', date, time, txnTs: toTxnTs(date, time), availLimitPaise: null, dedupeKey, source: 'sms', ...classified };
+  }
+
+  m = flat.match(UPI_CREDIT);
+  if (m) {
+    const amountPaise = parseAmountToPaise(m[1]);
+    const date = parseDateToken(m[3]);
+    const time = parseTimeToken(m[4]);
+    const party = m[6].trim();
+    if (!amountPaise || !date || !time) return null;
+    const { accountKey, ...acc } = base(m[2], accounts);
+    return { ...acc, amountPaise, direction: 'credit', kind: isHouseholdName(party, ownerNames) ? 'transfer' : 'income', date, time, txnTs: toTxnTs(date, time), merchantRaw: party, mode: 'upi', refNo: m[5], availLimitPaise: null, dedupeKey: `ref:${m[5]}`, linkHint: null, source: 'sms' };
+  }
+
+  m = flat.match(CARD_PAYMENT);
+  if (m) {
+    const amountPaise = parseAmountToPaise(m[1]);
+    const date = parseDateToken(m[3]);
+    if (!amountPaise || !date) return null;
+    const { accountKey, ...acc } = base(m[2], accounts);
+    return { ...acc, amountPaise, direction: 'credit', kind: 'transfer', date, time: null, txnTs: null, merchantRaw: '', mode: 'other', refNo: null, availLimitPaise: null, dedupeKey: `fp:${accountKey}|${amountPaise}|${date.replace(/-/g, '')}|payrecv`, linkHint: { type: 'card_payment', side: 'card', cardLast4: m[2] }, source: 'sms' };
+  }
+
+  m = flat.match(CASHBACK);
+  if (m && receivedAt) {
+    const amountPaise = parseAmountToPaise(m[1]);
+    const date = istDateFromMs(receivedAt);
+    if (!amountPaise) return null;
+    const { accountKey, ...acc } = base(m[2], accounts);
+    return { ...acc, amountPaise, direction: 'credit', kind: 'income', date, time: null, txnTs: null, merchantRaw: 'Cashback', mode: 'other', refNo: null, availLimitPaise: null, dedupeKey: `fp:${accountKey}|${amountPaise}|${date.replace(/-/g, '')}|cashback`, linkHint: null, source: 'sms' };
+  }
+
+  return null;
+}
 
 export const axisParser = {
   issuer: 'axis',
@@ -10,8 +102,11 @@ export const axisParser = {
     return /axis\s*bank/i.test(flat);
   },
 
-  parse({ lines, flat }, ctx = {}) {
+  parse({ lines, flat, receivedAt }, ctx = {}) {
     const accounts = ctx.accounts || [];
+
+    const later = parseLaterLayouts(flat, ctx, receivedAt);
+    if (later) return later;
 
     // Layout A: Multi-line Card Spend
     // Lines format:

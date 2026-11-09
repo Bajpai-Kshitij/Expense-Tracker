@@ -5,6 +5,70 @@ import { computePaymentLinkId } from '../../ingest/pipeline.js';
 import { checkTotals, isNeedsAttention } from './reconcile.js';
 import { statementLineKey, findSmsMatch, findManualMatch } from './match.js';
 
+const EMI_TYPES = new Set(['emi_interest', 'emi_principal', 'emi_tax', 'emi_fee']);
+const FEE_TYPES = new Set(['fee', 'tax']);
+
+function emiPartOf(line) {
+  return line.emiPart || { emi_principal: 'principal', emi_interest: 'interest', emi_tax: 'tax', emi_fee: 'fee' }[line.type] || null;
+}
+
+function emiPlanKeyOf(line, accountId) {
+  if (line.plan && line.plan.creationDate && line.plan.total != null && line.plan.loanPaise != null) {
+    return `emi:${accountId}|${line.plan.creationDate}|${line.plan.total}|${line.plan.loanPaise}`;
+  }
+  const emiMerchant = line.emiMerchant || line.merchant || line.merchantRaw || '';
+  return `emi:${accountId}|${emiMerchant.toUpperCase().replace(/[^A-Z0-9]/g, '')}|${line.emiTotal ?? ''}`;
+}
+
+function emiFieldsOf(line, accountId) {
+  return {
+    emiPlanKey: emiPlanKeyOf(line, accountId),
+    emiNo: line.emiNo ?? null,
+    emiTotal: line.emiTotal ?? null,
+    emiPart: emiPartOf(line),
+    emiMonthlyPaise: line.emiMonthlyPaise ?? (line.plan?.monthlyPaise ?? null),
+    emiFinishDate: line.emiFinishDate ?? (line.plan?.finishDate ?? null),
+    emiOutstandingPaise: line.emiOutstandingPaise ?? (line.plan?.outstandingPaise ?? null),
+  };
+}
+
+/** True if the field still has the value it got when the expense was created. */
+function isUnedited(exp, ...fields) {
+  const created = exp.field_ts?.dedupeKey;
+  return fields.every((field) => {
+    const stamp = exp.field_ts?.[field];
+    return !stamp || !created || (stamp.ts === created.ts && stamp.dev === created.dev);
+  });
+}
+
+/**
+ * Patch that brings an already imported expense in line with this line's classification.
+ * Fields the user changed are left alone. Returns null when nothing needs changing.
+ */
+function repairPatch(line, exp, accountId) {
+  const isEmi = EMI_TYPES.has(line.type);
+  const isConversion = line.type === 'emi_conversion';
+  if (!isEmi && !isConversion && !FEE_TYPES.has(line.type)) return null;
+
+  const patch = {};
+  const kind = isEmi ? 'fixed' : isConversion ? 'transfer' : null;
+  if (kind && exp.kind !== kind && isUnedited(exp, 'kind')) patch.kind = kind;
+
+  const categoryFree = !exp.categoryLocked && !exp.category_locked && isUnedited(exp, 'categoryId', 'category_id', 'category_locked', 'categoryLocked');
+  if (categoryFree) {
+    if (isEmi && exp.categoryId !== 'cat_emi') patch.categoryId = 'cat_emi';
+    if (FEE_TYPES.has(line.type) && !exp.categoryId) patch.categoryId = 'cat_fees';
+  }
+
+  if (isEmi) {
+    for (const [field, value] of Object.entries(emiFieldsOf(line, accountId))) {
+      if ((exp[field] ?? null) !== value) patch[field] = value;
+    }
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
 /**
  * Plans importing parsed statement lines into domain events.
  * PURE function with no side effects.
@@ -58,6 +122,7 @@ export function planStatementImport({
     payments: 0,
     paymentsLinked: 0,
     possibleDuplicates: 0,
+    repaired: 0,
     needsAttention,
     byType: {},
   };
@@ -136,6 +201,13 @@ export function planStatementImport({
 
     if (existingWithKey || existingById) {
       summary.alreadyImported += 1;
+      const existing = existingWithKey || existingById;
+      const patch = existing.deleted || existing.status === 'deleted' ? null : repairPatch(line, existing, accountId);
+      if (patch) {
+        summary.repaired += 1;
+        events.push({ type: 'expense.updated', data: { expenseId: existing.id, patch } });
+        Object.assign(existing, patch);
+      }
       plannedLines.push({
         line,
         status: 'already_imported',
@@ -264,6 +336,9 @@ export function planStatementImport({
         statementFileHash: fileHash,
       };
       if (line.refNo) patch.refNo = line.refNo;
+      if (line.type === 'emi_conversion' && allExpenses[matchedExpId].kind === 'spend') {
+        patch.kind = 'transfer';
+      }
 
       events.push({
         type: 'expense.updated',
@@ -326,9 +401,11 @@ export function planStatementImport({
 
       // Type "cashback" becomes kind "income", direction credit, never categorized
       const isCashback = line.type === 'cashback';
-      const isEmi = line.type === 'emi_interest' || line.type === 'emi_principal' || line.type === 'emi_tax';
-      const catResult = isCashback
-        ? { categoryId: null, brand: null, kind: 'income' }
+      const isEmi = EMI_TYPES.has(line.type);
+      const isConversion = line.type === 'emi_conversion';
+      const isFee = FEE_TYPES.has(line.type);
+      const catResult = isCashback || isConversion || isEmi
+        ? { categoryId: null, brand: null, kind: isCashback ? 'income' : null }
         : categorize(
             {
               merchantRaw: line.merchantRaw,
@@ -346,6 +423,8 @@ export function planStatementImport({
         finalKind = 'income';
       } else if (isEmi) {
         finalKind = 'fixed';
+      } else if (isConversion) {
+        finalKind = 'transfer';
       } else if (line.direction === 'credit' && line.type === 'refund') {
         finalKind = 'spend';
       } else if (catResult.kind) {
@@ -353,30 +432,13 @@ export function planStatementImport({
       }
 
       let finalCategoryId = isCashback ? null : (catResult.categoryId || null);
-      if (isEmi && !finalCategoryId) {
-        finalCategoryId = 'cat_emi';
-      }
-
-      let emiPlanKey = null;
       if (isEmi) {
-        if (line.plan && line.plan.creationDate && line.plan.total != null && line.plan.loanPaise != null) {
-          emiPlanKey = `emi:${accountId}|${line.plan.creationDate}|${line.plan.total}|${line.plan.loanPaise}`;
-        } else {
-          const emiMerchant = line.emiMerchant || line.merchant || line.merchantRaw || '';
-          const cleanMerchant = emiMerchant.toUpperCase().replace(/[^A-Z0-9]/g, '');
-          emiPlanKey = `emi:${accountId}|${cleanMerchant}|${line.emiTotal ?? ''}`;
-        }
+        finalCategoryId = 'cat_emi';
+      } else if (isFee && !finalCategoryId) {
+        finalCategoryId = 'cat_fees';
       }
 
-      const emiPart =
-        line.emiPart ||
-        (line.type === 'emi_principal'
-          ? 'principal'
-          : line.type === 'emi_interest'
-          ? 'interest'
-          : line.type === 'emi_tax'
-          ? 'tax'
-          : null);
+      const emi = isEmi ? emiFieldsOf(line, accountId) : {};
 
       const expenseData = {
         expenseId,
@@ -396,10 +458,10 @@ export function planStatementImport({
         statementKey: lineKey,
         statementFileHash: fileHash,
         note: '',
-        emiPlanKey: emiPlanKey || line.emiPlanKey || null,
+        emiPlanKey: emi.emiPlanKey ?? line.emiPlanKey ?? null,
         emiNo: line.emiNo ?? null,
         emiTotal: line.emiTotal ?? null,
-        emiPart,
+        emiPart: emi.emiPart ?? line.emiPart ?? null,
         emiMonthlyPaise: line.emiMonthlyPaise ?? (line.plan?.monthlyPaise ?? null),
         emiFinishDate: line.emiFinishDate ?? (line.plan?.finishDate ?? null),
         emiOutstandingPaise: line.emiOutstandingPaise ?? (line.plan?.outstandingPaise ?? null),
@@ -435,7 +497,7 @@ export function planStatementImport({
   for (const pl of plannedLines) {
     if (
       pl.line?.type === 'refund' ||
-      (pl.line?.direction === 'credit' && pl.line?.type !== 'payment' && pl.line?.type !== 'cashback')
+      (pl.line?.direction === 'credit' && !['payment', 'cashback', 'emi_conversion'].includes(pl.line?.type))
     ) {
       const refundExpId = pl.expenseId;
       const refundExp = allExpenses[refundExpId];
@@ -446,7 +508,7 @@ export function planStatementImport({
         if (!exp || exp.deleted || exp.status === 'deleted') return false;
         if (exp.id === refundExpId) return false;
         if (exp.accountId !== accountId) return false;
-        if (exp.direction !== 'debit') return false;
+        if (exp.direction !== 'debit' || exp.kind === 'transfer') return false;
         if (exp.amountPaise !== refundExp.amountPaise) return false;
         const diffDays = Math.abs((Date.parse(exp.date) - refundDateMs) / 86400000);
         return diffDays <= 14.0001;
@@ -495,4 +557,18 @@ export function planStatementImport({
     plannedLines,
     fileDuplicate: false,
   };
+}
+
+/**
+ * Events that undo a statement import: deletes the expenses this file created.
+ * SMS expenses it only linked to were real before the import, so they stay.
+ *
+ * @param {object} state - Current reducer state.
+ * @param {string} fileHash - SHA-256 of the statement file.
+ * @returns {Array<{ type: string, data: object }>}
+ */
+export function planUndoImport(state = {}, fileHash) {
+  return Object.values(state.expenses || {})
+    .filter((e) => !e.deleted && e.statementFileHash === fileHash && e.dedupeKey && e.dedupeKey === e.statementKey)
+    .map((e) => ({ type: 'expense.deleted', data: { expenseId: e.id } }));
 }

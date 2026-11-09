@@ -10,7 +10,15 @@ export async function createSqljsAdapter() {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
 
-  const adapter = {
+  // Same rule as the Capacitor adapter: top-level operations run one at a time.
+  let queue = Promise.resolve();
+  const enqueue = (op) => {
+    const run = queue.then(op, op);
+    queue = run.catch(() => {});
+    return run;
+  };
+
+  const handle = {
     async exec(sql, params = []) {
       if (!params || params.length === 0) {
         db.run(sql);
@@ -32,17 +40,24 @@ export async function createSqljsAdapter() {
       return rows;
     },
 
-    async transaction(fn) {
-      db.run('BEGIN TRANSACTION;');
-      try {
-        const result = await fn(adapter);
-        db.run('COMMIT;');
-        return result;
-      } catch (err) {
-        db.run('ROLLBACK;');
-        throw err;
-      }
-    },
+    transaction: (fn) => fn(handle),
+  };
+
+  const adapter = {
+    exec: (sql, params) => enqueue(() => handle.exec(sql, params)),
+    query: (sql, params) => enqueue(() => handle.query(sql, params)),
+    transaction: (fn) =>
+      enqueue(async () => {
+        db.run('BEGIN TRANSACTION;');
+        try {
+          const result = await fn(handle);
+          db.run('COMMIT;');
+          return result;
+        } catch (err) {
+          db.run('ROLLBACK;');
+          throw err;
+        }
+      }),
 
     export() {
       return db.export();

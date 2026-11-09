@@ -27,7 +27,12 @@ import ErrorBoundary from './ErrorBoundary.jsx';
 import { countOpenReviewItems } from '../core/db/reviewQueue.js';
 import { scanSms } from '../native/smsScan.js';
 import { readSms } from '../native/expenseNative.js';
-import { rowsToState } from '../core/db/index.js';
+import { loadStateFromDb } from '../core/db/index.js';
+import { upgradeProjectionIfNeeded } from '../core/sync/engine.js';
+import { buildDeviceGroups, mergeDevice } from '../core/sync/device.js';
+import { IGNORE_ACTION } from '../core/ingest/userIgnore.js';
+
+const SYNC_TIMEOUT_MS = 120000;
 
 export default function App() {
   const [appState, setAppState] = useState('loading'); // 'loading' | 'onboarding' | 'repick' | 'ready' | 'startup_error'
@@ -135,7 +140,8 @@ export default function App() {
         }
         return { id: r.id, pattern: r.pattern, categoryId: r.category_id, accountId: r.account_id };
       });
-      setRules(parsedRules);
+      // Deleted rules stay as tombstones, and ignore rules have their own list in SMS import.
+      setRules(parsedRules.filter((r) => !r._deleted && r.action !== IGNORE_ACTION));
 
       if (currentRuntime?.listDevices) {
         const devs = await currentRuntime.listDevices();
@@ -157,6 +163,7 @@ export default function App() {
       const summary = await currentRuntime.sync();
       setLastSyncTime(new Date());
       setLastSyncIssuesCount(summary.issues?.length || 0);
+      if (summary.reset) showToast('Started fresh from the other phone');
 
       // Reload lookups & trigger tab refresh
       await loadLookups(database || currentRuntime.db, currentRuntime);
@@ -203,6 +210,8 @@ export default function App() {
           status = { ok: false };
         }
 
+        if (savedLabel) setDeviceLabel(savedLabel);
+
         if (!status?.ok) {
           setFolderUri(savedUri);
           setFolderStatus(status);
@@ -212,7 +221,6 @@ export default function App() {
 
         setFolderUri(savedUri);
         setFolderStatus(status);
-        if (savedLabel) setDeviceLabel(savedLabel);
 
         currentStep = 'Initializing sync';
         const rt = await initRuntime({ folderUri: savedUri });
@@ -223,7 +231,13 @@ export default function App() {
 
         // Run initial sync and seed
         currentStep = 'First sync';
-        await withTimeout(rt.sync(), 15000, 'First sync');
+        await withTimeout(rt.sync(), SYNC_TIMEOUT_MS, 'First sync');
+
+        try {
+          await upgradeProjectionIfNeeded({ storage: rt.storage, db: database });
+        } catch (e) {
+          console.error('Read model upgrade skipped:', e?.message);
+        }
 
         currentStep = 'Seeding';
         await withTimeout(seedIfEmpty({ writer: rt.writer, db: database, settings }), 15000, 'Seeding');
@@ -243,17 +257,7 @@ export default function App() {
             if (!lastScanMs || (nowMs - lastScanMs >= 15 * 60 * 1000)) {
               if (!isSyncingRef.current && !isScanningRef.current) {
                 isScanningRef.current = true;
-                const getState = async () => {
-                  const rows = {
-                    expenses: await database.query('SELECT * FROM expenses;'),
-                    categories: await database.query('SELECT * FROM categories;'),
-                    accounts: await database.query('SELECT * FROM accounts;'),
-                    brands: await database.query('SELECT * FROM brands;'),
-                    rules: await database.query('SELECT * FROM rules;'),
-                    review_queue: await database.query('SELECT * FROM review_queue;'),
-                  };
-                  return rowsToState(rows);
-                };
+                const getState = () => loadStateFromDb(database);
 
                 scanSms({
                   readSms,
@@ -386,6 +390,38 @@ export default function App() {
     }
   };
 
+  const handleStartFresh = async () => {
+    if (!runtime || isSyncingRef.current) return;
+    try {
+      isSyncingRef.current = true;
+      await runtime.startFresh();
+    } catch (err) {
+      setErrorMessage(`Start fresh failed: ${err.message}`);
+      return;
+    } finally {
+      isSyncingRef.current = false;
+    }
+    await triggerSync(runtime, db);
+    showToast('Started fresh. Configuration kept.');
+  };
+
+  const handleMergeDevice = async (fromId, intoId) => {
+    if (!runtime) return;
+    try {
+      await mergeDevice({ storage: runtime.storage, deviceId: fromId, intoId });
+      await loadLookups(db, runtime);
+      setRefreshTick((prev) => prev + 1);
+      showToast('Device removed. Its expenses are kept.');
+    } catch (err) {
+      setErrorMessage(`Failed to remove device: ${err.message}`);
+    }
+  };
+
+  const deviceGroups = buildDeviceGroups(devices, deviceId);
+  // Filters use the whole group, so a person's older installs count as theirs.
+  const personDevices = deviceGroups.groups.map((g) => ({ ...g, deviceId: g.memberIds.join(',') }));
+  const labelledDevices = deviceGroups.groups.flatMap((g) => g.memberIds.map((id) => ({ deviceId: id, label: g.label })));
+
   const categoriesMap = categories.reduce((acc, c) => {
     acc[c.id] = c;
     return acc;
@@ -486,6 +522,7 @@ export default function App() {
             includeFixed={includeFixed}
             setIncludeFixed={setIncludeFixed}
             refreshTick={refreshTick}
+            deviceGroups={deviceGroups}
             onNavigateToExpenses={(filters) => {
               setExpenseFiltersOverride(filters);
               setActiveTab('expenses');
@@ -505,7 +542,7 @@ export default function App() {
             db={db}
             categories={categories}
             accounts={accounts}
-            devices={devices}
+            devices={personDevices}
             categoriesMap={categoriesMap}
             accountsMap={accountsMap}
             initialFilters={expenseFiltersOverride}
@@ -523,7 +560,7 @@ export default function App() {
             db={db}
             categories={categories}
             accounts={accounts}
-            devices={devices}
+            devices={labelledDevices}
             initialMonth={reportsMonth}
             onMonthChange={setReportsMonth}
             initialIncludeFixed={reportsIncludeFixed}
@@ -543,7 +580,9 @@ export default function App() {
             folderStatus={folderStatus}
             deviceId={deviceId}
             deviceLabel={deviceLabel}
-            devices={devices}
+            devices={deviceGroups.groups}
+            onMergeDevice={handleMergeDevice}
+            onStartFresh={handleStartFresh}
             lastSyncTime={lastSyncTime}
             lastSyncIssuesCount={lastSyncIssuesCount}
             openReviewCount={openReviewCount}
@@ -621,6 +660,10 @@ export default function App() {
             db={db}
             writer={runtime?.writer}
             accounts={accounts}
+            onReloadLookups={async () => {
+              await loadLookups(db, runtime);
+              setRefreshTick((prev) => prev + 1);
+            }}
             onBack={() => setActiveTab('settings')}
             onNavigateToReview={() => setActiveTab('review')}
             showToast={showToast}
@@ -739,6 +782,7 @@ export default function App() {
           brands={brands}
           rules={rules}
           writer={runtime?.writer}
+          db={db}
           deviceId={deviceId}
           onClose={() => {
             setShowModal(false);

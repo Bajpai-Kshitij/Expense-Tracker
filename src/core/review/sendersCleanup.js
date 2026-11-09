@@ -2,9 +2,9 @@ import { parseSms } from '../ingest/index.js';
 import { isAllowed } from '../ingest/senders.js';
 import { listReviewItems, markReviewResolved } from '../db/reviewQueue.js';
 
-const KNOWN_BANK_ISSUERS = new Set(['axis', 'icici', 'hdfc', 'idfc']);
+const KNOWN_BANK_ISSUERS = new Set(['axis', 'icici', 'hdfc', 'idfc', 'sbi', 'sbimf', 'indusind']);
 const BANK_REGEX = /\b(?:axis|icici|hdfc|idfc)\b/i;
-const SENDER_BANK_REGEX = /(?:axis|icici|hdfc|idfc)/i;
+const SENDER_BANK_REGEX = /(?:axis|icici|hdfc|idfc|sbi(?!mf))/i;
 
 /**
  * Checks if a message parses to a known bank issuer (axis, icici, hdfc, idfc)

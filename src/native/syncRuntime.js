@@ -1,47 +1,14 @@
 import { createCapacitorSqliteAdapter } from './sqlite.js';
 import { migrate } from '../core/db/migrations.js';
 import { createSyncStorage } from './syncStorage.js';
-import { ensureDevice } from '../core/sync/device.js';
+import { ensureDevice, listDevices } from '../core/sync/device.js';
 import { createWriter } from '../core/sync/writer.js';
 import { syncNow, rebuildFromLogs } from '../core/sync/engine.js';
 import { withTimeout } from './timeout.js';
+import { prepareConfigSync, finishConfigSync, startFresh } from '../core/config/sharedConfig.js';
 import { logStepStart, logStepFinish, logStepError } from './onboardingProgress.js';
 
-/**
- * Lists all known devices by scanning device-*.json metadata files in the shared storage folder.
- * 
- * @param {object} storage - Shared storage interface.
- * @returns {Promise<Array<{ deviceId: string, label: string, createdAt: string|null }>>}
- */
-export async function listDevices(storage) {
-  if (!storage || typeof storage.listFiles !== 'function') {
-    return [];
-  }
-
-  const files = await storage.listFiles('device-');
-  const deviceFiles = (files || []).filter(
-    (f) => f && f.name && f.name.startsWith('device-') && f.name.endsWith('.json')
-  );
-
-  const devices = [];
-  for (const f of deviceFiles) {
-    try {
-      const content = await storage.readFile(f.name);
-      if (content) {
-        const meta = JSON.parse(content);
-        devices.push({
-          deviceId: meta.deviceId || f.name.replace(/^device-/, '').replace(/\.json$/, ''),
-          label: meta.label || 'Unknown',
-          createdAt: meta.createdAt || null,
-        });
-      }
-    } catch (e) {
-      // Ignore corrupt metadata
-    }
-  }
-
-  return devices.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-}
+export { listDevices };
 
 /**
  * Initializes the full sync and database runtime on device.
@@ -86,7 +53,7 @@ export async function initRuntime({ folderUri, databaseName = 'expense_tracker' 
   const wrappedWriter = {
     ...writer,
     async write(type, data) {
-      return withTimeout(writer.write(type, data), 15000, 'Seeding');
+      return withTimeout(writer.write(type, data), 60000, 'Seeding');
     },
   };
 
@@ -99,7 +66,20 @@ export async function initRuntime({ folderUri, databaseName = 'expense_tracker' 
     sync: async (full = false) => {
       logStepStart('First sync');
       try {
-        const res = await withTimeout(syncNow({ storage, db, deviceId, full }), 15000, 'First sync');
+        const res = await withTimeout(
+          (async () => {
+            const before = await prepareConfigSync({ storage, db });
+            const summary = await syncNow({ storage, db, deviceId, full });
+            try {
+              await finishConfigSync({ storage, db, writer, config: before.config, invalid: before.invalid });
+            } catch (e) {
+              console.error('Config sync failed:', e?.message);
+            }
+            return { ...summary, reset: before.reset };
+          })(),
+          120000,
+          'First sync'
+        );
         logStepFinish('First sync');
         logStepStart('Seeding');
         return res;
@@ -109,6 +89,7 @@ export async function initRuntime({ folderUri, databaseName = 'expense_tracker' 
       }
     },
     rebuild: () => rebuildFromLogs({ storage, db }),
+    startFresh: () => startFresh({ storage, db }),
     listDevices: async () => {
       logStepFinish('Seeding');
       return withTimeout(listDevices(storage), 15000, 'Seeding');

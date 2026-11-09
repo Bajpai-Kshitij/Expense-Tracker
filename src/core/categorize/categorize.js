@@ -52,7 +52,7 @@ export function categorize(input = {}, context = {}) {
     : Object.values(context.rules || {});
 
   const activeBrands = rawBrands.filter((b) => b && b.active !== false).sort(priorityComparator);
-  const activeRules = rawRules.filter((r) => r && r.active !== false).sort(priorityComparator);
+  const activeRules = rawRules.filter((r) => r && r.active !== false && !r.action).sort(priorityComparator);
 
   let brandName = input.brand || null;
   let matchedBrandId = null;

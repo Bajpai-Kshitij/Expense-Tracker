@@ -199,9 +199,9 @@ describe('viewModels pure logic', () => {
 
     // 3. describeUnparsed with null or broken payloads
     expect(() => describeUnparsed(null)).not.toThrow();
-    expect(describeUnparsed(null)).toEqual({ preview: '', receivedAt: '', address: '' });
+    expect(describeUnparsed(null)).toEqual({ preview: '', fullMasked: '', receivedAt: '', address: '' });
     expect(() => describeUnparsed({ payload: null })).not.toThrow();
-    expect(describeUnparsed({ payload: null })).toEqual({ preview: '', receivedAt: '', address: '' });
+    expect(describeUnparsed({ payload: null })).toEqual({ preview: '', fullMasked: '', receivedAt: '', address: '' });
   });
 
   it('BUG 1 reproduction: groupReviewItems handles numeric epoch timestamps and missing fields without throwing', () => {

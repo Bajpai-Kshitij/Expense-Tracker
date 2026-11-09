@@ -66,6 +66,7 @@ export function normalizeFilters(uiState = {}, clock = () => Date.now()) {
   // Device attribution filter
   if (uiState.createdByDev && uiState.createdByDev !== 'all' && uiState.createdByDev !== 'All') {
     filters.createdByDev = uiState.createdByDev;
+    if (uiState.excludeAccountIds?.length) filters.excludeAccountIds = uiState.excludeAccountIds;
   }
 
   // Search text

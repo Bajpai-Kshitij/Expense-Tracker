@@ -260,7 +260,6 @@ describe('PHASE P2 - SQLite Read Model', () => {
       // Direct rebuild with all events
       await rebuildFromEvents(db, testEvents);
       const expectedDump = await dumpDatabase(db);
-      const expectedBytes = db.export();
 
       // Incremental apply in two separate batches on a fresh DB
       const dbBatched = await createSqljsAdapter();
@@ -273,10 +272,9 @@ describe('PHASE P2 - SQLite Read Model', () => {
       await applyEventsToDb(dbBatched, batch2);
 
       const actualDump = await dumpDatabase(dbBatched);
-      const actualBytes = dbBatched.export();
 
+      // Content must match. File bytes differ now that incremental applies write only changed rows.
       expect(actualDump).toEqual(expectedDump);
-      expect(actualBytes).toEqual(expectedBytes);
     });
 
     it('A parked event survives a rebuild and applies once its create arrives', async () => {

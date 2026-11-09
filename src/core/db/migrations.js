@@ -179,6 +179,16 @@ export const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 4,
+    name: 'expense_extras',
+    up: async (db) => {
+      const tableInfo = await db.query('PRAGMA table_info(expenses);');
+      if (!(tableInfo || []).some((col) => col.name === 'extras')) {
+        await db.exec('ALTER TABLE expenses ADD COLUMN extras TEXT;');
+      }
+    },
+  },
 ];
 
 /**
